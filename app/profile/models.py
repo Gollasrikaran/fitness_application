@@ -8,7 +8,7 @@ from sqlalchemy import (
     Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer,
     Numeric, String, Text, UniqueConstraint, func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.platform.db import Base
@@ -54,6 +54,47 @@ class UserCondition(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class CustomExercise(Base):
+    """4.4 — a user's own free-named exercise.
+
+    Personal (owned by exactly one user), tracking-only: never suggested,
+    never programmed (13.1). Exists purely so activity_logs has something
+    to point at when a user logs something outside the reviewed taxonomy.
+    """
+    __tablename__ = "custom_exercises"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Lowercased/trimmed, so "Swimming" and "swimming " collide as one entry.
+    normalized_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    # 1 to 3 of 'reps'/'distance'/'duration' — a user can track an exercise by
+    # more than one measure at once (e.g. Swimming by both Distance and Time).
+    # unit and plausible_max_total aren't stored: both are fixed per type (see
+    # CUSTOM_MEASUREMENT_UNITS / CUSTOM_MEASUREMENT_DEFAULT_MAX in service.py),
+    # so keeping a copy on the row would just be a second place to drift.
+    measurement_types: Mapped[list[str]] = mapped_column(ARRAY(String(16)), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Soft delete (mirrors User.deleted_at): the row stays so past logs that
+    # reference it via the FK keep displaying correctly (recent_logs joins
+    # on this table by name) - it just drops out of list_custom_exercises
+    # and can no longer be logged against. This is what actually lets a
+    # user delete an exercise with history, instead of refusing outright.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        # No DB-level uniqueness here on purpose: a name must stay free to
+        # reuse once its old row is soft-deleted, and the service layer
+        # already enforces "no two ACTIVE exercises share a name" itself.
+        CheckConstraint(
+            "measurement_types <@ ARRAY['reps','distance','duration']::varchar[] "
+            "AND array_length(measurement_types, 1) BETWEEN 1 AND 3",
+            name="custom_measurement_known"),
+    )
+
+
 class ActivityLog(Base):
     """4.1 — one entry point for manual and voice input alike."""
     __tablename__ = "activity_logs"
@@ -61,8 +102,16 @@ class ActivityLog(Base):
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     user_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    activity_type: Mapped[str] = mapped_column(
-        String(64), ForeignKey("activity_taxonomy.activity_type"), nullable=False)
+    # Exactly one of these two is set (see log_exactly_one_source below).
+    # Official taxonomy activity:
+    activity_type: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("activity_taxonomy.activity_type"), nullable=True)
+    # 4.4 — or the user's own custom exercise. No ON DELETE CASCADE here on
+    # purpose: deleting a custom exercise must never silently erase the
+    # history logged against it (see delete_custom_exercise in service.py,
+    # which refuses the delete instead while logs still reference it).
+    custom_exercise_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("custom_exercises.id"), nullable=True)
 
     # What was actually performed, in the shape it was prescribed.
     sets_done: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -90,6 +139,8 @@ class ActivityLog(Base):
         CheckConstraint("source IN ('manual','voice')", name="log_source_known"),
         CheckConstraint("amount_per_set > 0", name="log_amount_positive"),
         CheckConstraint("sets_done >= 1", name="log_sets_positive"),
+        CheckConstraint("num_nonnulls(activity_type, custom_exercise_id) = 1",
+                        name="log_exactly_one_source"),
     )
 
 

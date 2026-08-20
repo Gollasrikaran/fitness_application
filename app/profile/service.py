@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.catalog.models import ActivityTaxonomy, Condition, SafetyGridCell, VideoCatalog
 from app.platform.errors import Forbidden, NotFound, ValidationError
 from app.profile.models import (
-    ActivityLog, OverrideConsent, UserCondition, UserProfile, UserProgram,
+    ActivityLog, CustomExercise, OverrideConsent, UserCondition, UserProfile, UserProgram,
 )
 
 IST = timezone(timedelta(hours=5, minutes=30))  # single market (3.3)
@@ -117,6 +117,46 @@ def complete_onboarding(session: Session, user_id: str, *, age: int, goal: str,
     return {"referred": False, "message": None, "program": program}
 
 
+UNIT_PREFERENCES = {"km", "mi"}
+
+
+def update_profile(session: Session, user_id: str, *, fields: dict) -> dict:
+    """3.4 — edit one or more simple fields without touching conditions or the
+    program. Only age / goal / experience_band / unit_preference are settable
+    here; anything else in `fields` is ignored rather than silently accepted.
+    """
+    prof = session.get(UserProfile, user_id)
+    if prof is None:
+        raise NotFound("Complete onboarding before editing your profile.")
+
+    if "age" in fields:
+        age = fields["age"]
+        if not isinstance(age, int) or age < 18:
+            raise ValidationError("You must be 18 or over to use this app.")
+        prof.age = age
+
+    if "goal" in fields:
+        goal = fields["goal"]
+        if goal not in GOALS:
+            raise ValidationError(f"Goal must be one of: {', '.join(sorted(GOALS))}")
+        prof.goal = goal
+
+    if "experience_band" in fields:
+        band = fields["experience_band"]
+        if band not in BANDS:
+            raise ValidationError(f"Experience band must be one of: {', '.join(sorted(BANDS))}")
+        prof.experience_band = band
+
+    if "unit_preference" in fields:
+        unit = fields["unit_preference"]
+        if unit not in UNIT_PREFERENCES:
+            raise ValidationError(f"Unit preference must be one of: {', '.join(sorted(UNIT_PREFERENCES))}")
+        prof.unit_preference = unit
+
+    session.flush()
+    return profile_summary(session, user_id)
+
+
 # --- Program ---------------------------------------------------------------
 
 def _blocked_activities(session: Session, user_id: str) -> dict[str, str]:
@@ -160,17 +200,26 @@ def build_program(session: Session, user_id: str) -> list[dict]:
     return get_program(session, user_id)
 
 
-def get_program(session: Session, user_id: str) -> list[dict]:
+def get_program(session: Session, user_id: str, *, include_suspended: bool = False) -> list[dict]:
     if is_referred(session, user_id):
         return []
     modified = _modified_activities(session, user_id)
-    rows = session.execute(
+    query = (
         select(UserProgram, ActivityTaxonomy)
         .join(ActivityTaxonomy,
               ActivityTaxonomy.activity_type == UserProgram.activity_type)
         .where(UserProgram.user_id == user_id)
-        .order_by(ActivityTaxonomy.display_name)
-    ).all()
+    )
+    if not include_suspended:
+        # A manually-removed entry (remove_program_entry) is soft-deleted via
+        # status="suspended" rather than an actual row delete, so it must be
+        # filtered out here — otherwise every caller that returns this straight
+        # to the client (GET /v1/program, and the response after add/remove)
+        # would show a "removed" exercise forever. _dashboard_slice is the one
+        # deliberate exception: it needs the suspended rows too, to cancel out
+        # the tier backfill for a removed entry (see its own comment).
+        query = query.where(UserProgram.status == "active")
+    rows = session.execute(query.order_by(ActivityTaxonomy.display_name)).all()
     out = []
     for p, t in rows:
         amount = float(p.target_amount)
@@ -249,7 +298,7 @@ def list_catalogue(session: Session, user_id: str) -> list[dict]:
     """
     if is_referred(session, user_id):
         raise Forbidden("Speak to a doctor before adding exercises to your program.")
-    _program, visible, _band = _dashboard_slice(session, user_id)
+    _program, visible, _band, _default, _optional = _dashboard_slice(session, user_id)
     out = []
     for t in session.scalars(
             select(ActivityTaxonomy).order_by(ActivityTaxonomy.priority_order)).all():
@@ -315,6 +364,10 @@ def add_program_entry(session: Session, user_id: str, activity_type: str,
         existing.status = "active"
         existing.suspended_reason = None
         existing.source = source
+        # A re-add is a fresh start for "logged today" purposes (matches how
+        # deleting+recreating a custom exercise gets a fresh id): any log from
+        # before this moment must not count toward today's completion below.
+        existing.added_at = datetime.now(timezone.utc)
     else:
         session.add(UserProgram(
             user_id=user_id, activity_type=activity_type,
@@ -326,9 +379,17 @@ def add_program_entry(session: Session, user_id: str, activity_type: str,
 
 
 def remove_program_entry(session: Session, user_id: str, activity_type: str) -> dict:
-    """14.7 — always permitted, for any entry, even for a referred user."""
-    session.execute(delete(UserProgram).where(
-        UserProgram.user_id == user_id, UserProgram.activity_type == activity_type))
+    """14.7 — always permitted, for any entry, even for a referred user.
+
+    Marks the entry removed rather than deleting it, and _dashboard_slice
+    trims the tier's visible count to match - a manual removal must stay
+    removed, never silently backfilled by the next-priority template
+    activity. Bringing it back is only ever a deliberate catalogue add.
+    """
+    row = session.get(UserProgram, (user_id, activity_type))
+    if row is not None:
+        row.status = "suspended"
+        row.suspended_reason = "user_removed"
     session.flush()
     return {"removed": True, "program": get_program(session, user_id)}
 
@@ -359,31 +420,67 @@ def _tier_slice(items_by_priority: list[dict], band: str) -> tuple[set[str], set
 
 # --- Logging ---------------------------------------------------------------
 
-def log_activity(session: Session, user_id: str, *, activity_type: str,
-                 amount: float, sets: int = 1, unit: str | None = None,
-                 source: str = "manual", client_entry_id: str | None = None) -> dict:
-    row = session.get(ActivityTaxonomy, activity_type)
-    if row is None:
-        raise NotFound(f"Unknown activity: {activity_type}")
+def log_activity(session: Session, user_id: str, *, activity_type: str | None = None,
+                 custom_exercise_id: str | None = None, amount: float, sets: int = 1,
+                 unit: str | None = None, source: str = "manual",
+                 client_entry_id: str | None = None) -> dict:
+    if bool(activity_type) == bool(custom_exercise_id):
+        raise ValidationError("Provide exactly one of activity_type or custom_exercise_id.")
 
-    unit = unit or row.amount_unit
-    if unit != row.amount_unit:
-        raise ValidationError(
-            f"{row.display_name} is measured in {row.amount_unit}, not {unit}."
-        )
-    if amount <= 0:
-        raise ValidationError("Amount must be greater than zero.")
-    if sets < 1:
-        raise ValidationError("Sets must be at least 1.")
-    if row.prescription_type in ("distance", "duration") and sets != 1:
-        # One continuous effort. Sets would be meaningless and would double-count
-        # into total_volume.
-        raise ValidationError(f"{row.display_name} is a single effort, not sets.")
+    if custom_exercise_id:
+        # 4.4 — same entry point, same validation shape as a taxonomy log;
+        # the only different source is where the ceiling/unit come from.
+        custom = session.get(CustomExercise, custom_exercise_id)
+        if custom is None or custom.user_id != user_id or custom.deleted_at is not None:
+            raise NotFound(f"Unknown custom exercise: {custom_exercise_id}")
+        # unit->type is 1:1 (count/km/min never collide), so the unit on this
+        # log tells us which of the exercise's selected types it belongs to -
+        # no separate measurement-type field is needed on the log itself.
+        allowed = {CUSTOM_MEASUREMENT_UNITS[t]: t for t in custom.measurement_types}
+        if unit is None:
+            if len(allowed) != 1:
+                raise ValidationError(
+                    f"{custom.name} tracks more than one thing — specify unit: "
+                    f"{', '.join(sorted(allowed))}.")
+            unit = next(iter(allowed))
+        if unit not in allowed:
+            raise ValidationError(
+                f"{custom.name} is measured in {', '.join(sorted(allowed))}, not {unit}.")
+        measurement_type = allowed[unit]
+        if amount <= 0:
+            raise ValidationError("Amount must be greater than zero.")
+        if sets < 1:
+            raise ValidationError("Sets must be at least 1.")
+        if measurement_type in ("distance", "duration") and sets != 1:
+            raise ValidationError(f"{custom.name} is a single effort, not sets.")
+        total = amount * sets
+        implausible = Decimal(str(total)) > Decimal(str(CUSTOM_MEASUREMENT_DEFAULT_MAX[measurement_type]))
+        prescription = f"{sets} x {amount} {unit}" if sets > 1 else f"{amount} {unit}"
+        row_activity_type = None
+    else:
+        row = session.get(ActivityTaxonomy, activity_type)
+        if row is None:
+            raise NotFound(f"Unknown activity: {activity_type}")
 
-    total = row.total_volume(sets, amount)
+        unit = unit or row.amount_unit
+        if unit != row.amount_unit:
+            raise ValidationError(
+                f"{row.display_name} is measured in {row.amount_unit}, not {unit}."
+            )
+        if amount <= 0:
+            raise ValidationError("Amount must be greater than zero.")
+        if sets < 1:
+            raise ValidationError("Sets must be at least 1.")
+        if row.prescription_type in ("distance", "duration") and sets != 1:
+            # One continuous effort. Sets would be meaningless and would double-count
+            # into total_volume.
+            raise ValidationError(f"{row.display_name} is a single effort, not sets.")
 
-    # 4.6 — kept and flagged, never rejected. A user's entry is theirs.
-    implausible = Decimal(str(total)) > row.plausible_max_total
+        total = row.total_volume(sets, amount)
+        # 4.6 — kept and flagged, never rejected. A user's entry is theirs.
+        implausible = Decimal(str(total)) > row.plausible_max_total
+        prescription = row.describe(sets, amount)
+        row_activity_type = activity_type
 
     if client_entry_id:
         existing = session.scalar(
@@ -397,7 +494,8 @@ def log_activity(session: Session, user_id: str, *, activity_type: str,
                     "total_volume": float(existing.total_volume)}
 
     log = ActivityLog(
-        user_id=user_id, activity_type=activity_type,
+        user_id=user_id, activity_type=row_activity_type,
+        custom_exercise_id=custom_exercise_id,
         sets_done=sets, amount_per_set=amount, unit=unit, total_volume=total,
         local_date=today_ist(), source=source, implausible=implausible,
         client_entry_id=client_entry_id,
@@ -405,26 +503,175 @@ def log_activity(session: Session, user_id: str, *, activity_type: str,
     session.add(log)
     session.flush()
     return {"id": log.id, "duplicate": False, "implausible": implausible,
-            "total_volume": total, "prescription": row.describe(sets, amount)}
+            "total_volume": total, "prescription": prescription}
+
+
+# --- Custom exercises (4.4) --------------------------------------------------
+# Personal, tracking-only. Never read by suggestions_today, build_program, or
+# list_catalogue — those stay taxonomy-only, on purpose (13.1).
+
+CUSTOM_MEASUREMENT_UNITS = {"reps": "count", "distance": "km", "duration": "min"}
+CUSTOM_MEASUREMENT_DEFAULT_MAX = {"reps": 500, "distance": 50, "duration": 300}
+CUSTOM_EXERCISE_CAP = 20
+
+
+def _normalise_exercise_name(name: str) -> str:
+    return " ".join(name.strip().lower().split())
+
+
+def _custom_exercise_out(row: CustomExercise, *, completed_today: bool = False) -> dict:
+    return {"id": row.id, "name": row.name,
+            "measurement_types": row.measurement_types,
+            "units": [CUSTOM_MEASUREMENT_UNITS[t] for t in row.measurement_types],
+            "completed_today": completed_today}
+
+
+def list_custom_exercises(session: Session, user_id: str) -> list[dict]:
+    rows = session.scalars(
+        select(CustomExercise).where(CustomExercise.user_id == user_id,
+                                      CustomExercise.deleted_at.is_(None))
+        .order_by(CustomExercise.created_at)
+    ).all()
+    # Same "done today" concept the built-in cards already use (suggestions_today).
+    done_today = set(session.scalars(
+        select(ActivityLog.custom_exercise_id).where(
+            ActivityLog.user_id == user_id,
+            ActivityLog.local_date == today_ist(),
+            ActivityLog.custom_exercise_id.is_not(None))
+    ).all())
+    return [_custom_exercise_out(r, completed_today=r.id in done_today) for r in rows]
+
+
+def _reject_if_matches_taxonomy(session: Session, normalized: str, label: str) -> None:
+    """Dedup against the official taxonomy (4.4) — "jogging" must resolve to
+    the real `run` activity, never spawn a personal duplicate of it. Shared by
+    create and rename so the matching rule can't drift between the two."""
+    for t in session.scalars(select(ActivityTaxonomy)).all():
+        synonyms = {s.lower() for s in (t.synonyms or [])}
+        if normalized == t.display_name.lower() or normalized in synonyms:
+            raise ValidationError(
+                f'"{label}" matches the built-in activity "{t.display_name}" — log that instead.'
+            )
+
+
+def create_custom_exercise(session: Session, user_id: str, *, name: str,
+                           measurement_types: list[str]) -> dict:
+    name = (name or "").strip()
+    if not name:
+        raise ValidationError("Name is required.")
+    if len(name) > 64:
+        raise ValidationError("Name must be 64 characters or fewer.")
+    # De-dup while keeping the order the user picked them in.
+    measurement_types = list(dict.fromkeys(measurement_types or []))
+    if not measurement_types:
+        raise ValidationError("Pick at least one way to count it.")
+    if len(measurement_types) > 3:
+        raise ValidationError("Pick at most 3 ways to count it.")
+    unknown = [m for m in measurement_types if m not in CUSTOM_MEASUREMENT_UNITS]
+    if unknown:
+        raise ValidationError(
+            f"measurement_types must be one of: {', '.join(sorted(CUSTOM_MEASUREMENT_UNITS))}")
+
+    normalized = _normalise_exercise_name(name)
+    _reject_if_matches_taxonomy(session, normalized, name)
+
+    existing = session.scalar(
+        select(CustomExercise).where(
+            CustomExercise.user_id == user_id,
+            CustomExercise.normalized_name == normalized,
+            CustomExercise.deleted_at.is_(None))
+    )
+    if existing is not None:
+        raise ValidationError(f'You already have a custom exercise called "{existing.name}".')
+
+    count = session.scalar(
+        select(func.count()).select_from(CustomExercise)
+        .where(CustomExercise.user_id == user_id, CustomExercise.deleted_at.is_(None))
+    )
+    if count >= CUSTOM_EXERCISE_CAP:
+        raise ValidationError(f"You can have at most {CUSTOM_EXERCISE_CAP} custom exercises.")
+
+    row = CustomExercise(
+        user_id=user_id, name=name, normalized_name=normalized,
+        measurement_types=measurement_types,
+    )
+    session.add(row)
+    session.flush()
+    return _custom_exercise_out(row)
+
+
+def rename_custom_exercise(session: Session, user_id: str, exercise_id: str,
+                           new_name: str) -> dict:
+    row = session.get(CustomExercise, exercise_id)
+    if row is None or row.user_id != user_id or row.deleted_at is not None:
+        raise NotFound("Custom exercise not found.")
+    new_name = (new_name or "").strip()
+    if not new_name:
+        raise ValidationError("Name is required.")
+    if len(new_name) > 64:
+        raise ValidationError("Name must be 64 characters or fewer.")
+    normalized = _normalise_exercise_name(new_name)
+    _reject_if_matches_taxonomy(session, normalized, new_name)
+
+    clash = session.scalar(
+        select(CustomExercise).where(
+            CustomExercise.user_id == user_id,
+            CustomExercise.normalized_name == normalized,
+            CustomExercise.deleted_at.is_(None),
+            CustomExercise.id != exercise_id)
+    )
+    if clash is not None:
+        raise ValidationError(f'You already have a custom exercise called "{clash.name}".')
+    row.name = new_name
+    row.normalized_name = normalized
+    session.flush()
+    return _custom_exercise_out(row)
+
+
+def delete_custom_exercise(session: Session, user_id: str, exercise_id: str) -> dict:
+    """Soft delete (4.4). Past logs keep referencing this row via the FK -
+    recent_logs joins on it by name - so history keeps displaying exactly
+    as it did before, it just drops off list_custom_exercises and can no
+    longer be logged against (see log_activity above).
+    """
+    row = session.get(CustomExercise, exercise_id)
+    if row is None or row.user_id != user_id or row.deleted_at is not None:
+        raise NotFound("Custom exercise not found.")
+    row.deleted_at = datetime.now(timezone.utc)
+    session.flush()
+    return {"deleted": True}
 
 
 def recent_logs(session: Session, user_id: str, limit: int = 10) -> list[dict]:
     rows = session.execute(
-        select(ActivityLog, ActivityTaxonomy)
-        .join(ActivityTaxonomy,
-              ActivityTaxonomy.activity_type == ActivityLog.activity_type)
+        select(ActivityLog, ActivityTaxonomy, CustomExercise)
+        .outerjoin(ActivityTaxonomy,
+                   ActivityTaxonomy.activity_type == ActivityLog.activity_type)
+        .outerjoin(CustomExercise,
+                   CustomExercise.id == ActivityLog.custom_exercise_id)
         .where(ActivityLog.user_id == user_id)
         .order_by(ActivityLog.logged_at.desc())
         .limit(limit)
     ).all()
-    return [{
-        "display_name": t.display_name,
-        "activity_type": l.activity_type,
-        "sets": l.sets_done, "amount": float(l.amount_per_set), "unit": l.unit,
-        "prescription": t.describe(l.sets_done, float(l.amount_per_set)),
-        "logged_at": l.logged_at.isoformat(),
-        "implausible": l.implausible, "source": l.source,
-    } for l, t in rows]
+    out = []
+    for l, t, c in rows:
+        if t is not None:
+            display_name = t.display_name
+            prescription = t.describe(l.sets_done, float(l.amount_per_set))
+        else:
+            display_name = c.name
+            prescription = (f"{l.sets_done} x {l.amount_per_set} {l.unit}"
+                            if l.sets_done > 1 else f"{l.amount_per_set} {l.unit}")
+        out.append({
+            "display_name": display_name,
+            "activity_type": l.activity_type,
+            "custom": t is None,
+            "sets": l.sets_done, "amount": float(l.amount_per_set), "unit": l.unit,
+            "prescription": prescription,
+            "logged_at": l.logged_at.isoformat(),
+            "implausible": l.implausible, "source": l.source,
+        })
+    return out
 
 
 def streak(session: Session, user_id: str) -> dict:
@@ -450,27 +697,59 @@ def streak(session: Session, user_id: str) -> dict:
             "active_days": len(days)}
 
 
-def weekly_volume(session: Session, user_id: str) -> list[dict]:
-    """Seven days of logged volume for the dashboard chart."""
+MAX_TREND_DAYS = 365
+
+
+def trend(session: Session, user_id: str, *, days: int | None = None,
+          start_date: date | None = None, end_date: date | None = None) -> list[dict]:
+    """4.3 — logged-activity counts over an arbitrary window.
+
+    Either pass `days` (counts back from today, inclusive) or an explicit
+    start_date/end_date pair for a custom range. weekly_volume below is just
+    this with days=7, so the original 7-day dashboard chart is unchanged.
+    """
     today = today_ist()
-    start = today - timedelta(days=6)
+    if start_date is not None or end_date is not None:
+        if start_date is None or end_date is None:
+            raise ValidationError("start_date and end_date must both be provided together.")
+        if start_date > end_date:
+            raise ValidationError("start_date must be on or before end_date.")
+        if end_date > today:
+            end_date = today
+        if (end_date - start_date).days + 1 > MAX_TREND_DAYS:
+            raise ValidationError(f"Custom range cannot exceed {MAX_TREND_DAYS} days.")
+        start, end = start_date, end_date
+    else:
+        n = days if days is not None else 7
+        if n < 1 or n > MAX_TREND_DAYS:
+            raise ValidationError(f"days must be between 1 and {MAX_TREND_DAYS}.")
+        start, end = today - timedelta(days=n - 1), today
+
     rows = session.execute(
         select(ActivityLog.local_date, func.count())
         .where(ActivityLog.user_id == user_id,
                ActivityLog.local_date >= start,
+               ActivityLog.local_date <= end,
                ActivityLog.implausible.is_(False))
         .group_by(ActivityLog.local_date)
     ).all()
     counts = {d: n for d, n in rows}
+    span = (end - start).days + 1
     return [{"date": (start + timedelta(days=i)).isoformat(),
              "label": (start + timedelta(days=i)).strftime("%a")[0],
              "count": counts.get(start + timedelta(days=i), 0)}
-            for i in range(7)]
+            for i in range(span)]
+
+
+def weekly_volume(session: Session, user_id: str) -> list[dict]:
+    """Seven days of logged volume for the dashboard chart (unchanged, 4.3)."""
+    return trend(session, user_id, days=7)
 
 
 # --- Suggestions + videos --------------------------------------------------
 
-def _dashboard_slice(session: Session, user_id: str) -> tuple[list[dict], set[str], str]:
+def _dashboard_slice(session: Session, user_id: str
+                     ) -> tuple[list[dict], set[str], str, set[str], set[str]]:
     """The activities the dashboard actually shows, and the tier band used to
     decide it. Shared by suggestions_today (renders them) and list_catalogue
     (offers everything ELSE) so the two can never quietly disagree about what
@@ -482,25 +761,57 @@ def _dashboard_slice(session: Session, user_id: str) -> tuple[list[dict], set[st
     silently swallowed by a beginner-tier cap the user has already stepped
     past for that one activity.
     """
-    program = [p for p in get_program(session, user_id) if p["status"] == "active"]
+    full_program = get_program(session, user_id, include_suspended=True)
+    program = [p for p in full_program if p["status"] == "active"]
     prof = session.get(UserProfile, user_id)
     band = prof.experience_band if prof else "beginner"
-    default_codes, optional_codes = _tier_slice(program, band)
+
+    # A manual removal (remove_program_entry) marks the row suspended rather
+    # than deleting it, specifically so it can be excluded here WITHOUT ever
+    # being backfilled. _tier_slice is run as if the removal never happened
+    # (the removed row is temporarily added back into consideration just for
+    # this calculation), then subtracted straight out of the result - this
+    # is what actually cancels the backfill, whatever the tier's cap is.
+    #
+    # A plain "trim N off the tail" correction (tried first, wrong) over-
+    # corrects the moment nothing was being backfilled in the first place -
+    # e.g. the "experienced" band has no cap at all, or the activity pool
+    # has simply run out - and ends up dropping one extra, unrelated
+    # activity on top of the one actually removed.
+    user_removed = set(session.scalars(
+        select(UserProgram.activity_type).where(
+            UserProgram.user_id == user_id, UserProgram.status == "suspended",
+            UserProgram.suspended_reason == "user_removed")
+    ).all())
+    program_for_tier = [p for p in full_program
+                        if p["status"] == "active" or p["activity_type"] in user_removed]
+    default_codes, optional_codes = _tier_slice(program_for_tier, band)
+    default_codes -= user_removed
+    optional_codes -= user_removed
+
     self_added = {p["activity_type"] for p in program
                   if p["source"] in ("manual", "user_override")}
-    return program, default_codes | optional_codes | self_added, band
+    return program, default_codes | optional_codes | self_added, band, default_codes, optional_codes
 
 
 def suggestions_today(session: Session, user_id: str, limit: int = 3) -> dict:
     if is_referred(session, user_id):
         return {"referred": True, "message": REFERRAL_MESSAGE, "items": []}
 
-    program, visible, band = _dashboard_slice(session, user_id)
-    default_codes, optional_codes = _tier_slice(program, band)
-    done = set(session.scalars(
-        select(ActivityLog.activity_type).where(
+    program, visible, band, default_codes, optional_codes = _dashboard_slice(session, user_id)
+    # Latest log per activity today, not just "did it happen": a log from
+    # before this program entry's most recent add/re-add (see add_program_entry)
+    # must not count as completing today's fresh instance of it.
+    last_logged = dict(session.execute(
+        select(ActivityLog.activity_type, func.max(ActivityLog.logged_at)).where(
             ActivityLog.user_id == user_id,
-            ActivityLog.local_date == today_ist())
+            ActivityLog.local_date == today_ist(),
+            ActivityLog.activity_type.is_not(None))
+        .group_by(ActivityLog.activity_type)
+    ).all())
+    added_at_by_type = dict(session.execute(
+        select(UserProgram.activity_type, UserProgram.added_at).where(
+            UserProgram.user_id == user_id, UserProgram.status == "active")
     ).all())
 
     videos = {v.activity_type: v for v in session.scalars(select(VideoCatalog)).all()}
@@ -517,7 +828,11 @@ def suggestions_today(session: Session, user_id: str, limit: int = 3) -> dict:
         if p["activity_type"] not in visible:
             continue
         v = videos.get(p["activity_type"])
-        items.append({**p, "completed": p["activity_type"] in done,
+        logged_at = last_logged.get(p["activity_type"])
+        added_at = added_at_by_type.get(p["activity_type"])
+        completed = (logged_at is not None and added_at is not None
+                     and logged_at >= added_at)
+        items.append({**p, "completed": completed,
                       "video_url": v.watch_url if v else None,
                       "tier": tier_of(p["activity_type"])})
 
