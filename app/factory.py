@@ -35,9 +35,11 @@ def create_app() -> Flask:
 
     from app.auth.routes import account_bp, bp as auth_bp
     from app.profile.routes import bp as core_bp
+    from app.rag.routes import bp as rehab_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(account_bp)
     app.register_blueprint(core_bp)
+    app.register_blueprint(rehab_bp)
 
     if not cfg.is_production:
         # Never mounted in production - it exists to drive the API by hand.

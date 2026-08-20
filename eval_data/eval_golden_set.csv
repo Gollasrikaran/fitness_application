@@ -1,0 +1,101 @@
+condition_code,question,question_type
+chronic_back_pain,What are the risk factors for chronic back pain?,formal
+chronic_back_pain,"my lower back has been aching constantly for months, what's going on",symptom_description
+chronic_back_pain,What movements or activities should I avoid with a bad back?,what_to_avoid
+chronic_back_pain,"yaar my back is paining too much since morning",casual_indian
+chronic_back_pain,What is the exact name of the painkiller I should take for this back pain right now?,edge_case
+chronic_back_pain,When should I see a doctor for this constant back ache?,when_to_see_doctor
+chronic_back_pain,what should I do and what should I avoid for back pain,multi_part
+chronic_back_pain,back hurts bad,terse
+chronic_back_pain,is it okay to keep exercising even if it still hurts a bit,follow_up
+chronic_back_pain,"is this serious, should I be worried about my back",anxious
+herniated_disk,What are the primary causes of a herniated disc?,formal
+herniated_disk,"I have a sharp pain shooting down my leg from my back, what could this be",symptom_description
+herniated_disk,What should I avoid doing if I have a slipped disc?,what_to_avoid
+herniated_disk,"my slip disc is giving me a lot of trouble today",casual_indian
+herniated_disk,Which specific core exercise is best to fix a herniated disc instantly?,edge_case
+herniated_disk,At what point does a herniated disc require medical attention?,when_to_see_doctor
+herniated_disk,How can I relieve the pain and what postures are bad for a slipped disc?,multi_part
+herniated_disk,slipped disc pain,terse
+herniated_disk,if the numbness goes away can I start lifting heavy again,follow_up
+herniated_disk,"will I need surgery for this slip disc, I'm really scared",anxious
+degenerative_disc,What is the typical progression of degenerative disc disease?,formal
+degenerative_disc,"my back feels stiff and hurts more when I sit for a long time",symptom_description
+degenerative_disc,Are there certain sports I should avoid with degenerative discs?,what_to_avoid
+degenerative_disc,"uncle ji's disc problem is acting up, what to do",casual_indian
+degenerative_disc,Can you prescribe a strong medication for my disc pain?,edge_case
+degenerative_disc,When is it necessary to consult a specialist for degenerative disc pain?,when_to_see_doctor
+degenerative_disc,what exercises are safe and what should I completely stop doing,multi_part
+degenerative_disc,disc degeneration ache,terse
+degenerative_disc,does the pain ever go away completely or is this forever,follow_up
+degenerative_disc,"is my spine collapsing, I am very stressed about this",anxious
+spinal_stenosis,How does spinal stenosis affect nerve function over time?,formal
+spinal_stenosis,"my legs feel heavy and cramp up when I walk but get better when I lean forward",symptom_description
+spinal_stenosis,What sleeping positions should I avoid with spinal stenosis?,what_to_avoid
+spinal_stenosis,"walking is becoming very difficult because of this spine issue",casual_indian
+spinal_stenosis,Tell me exactly which surgery is best for spinal stenosis.,edge_case
+spinal_stenosis,What are the red flag symptoms of spinal stenosis that mean I need a doctor?,when_to_see_doctor
+spinal_stenosis,what causes this narrowing and how can I fix it at home,multi_part
+spinal_stenosis,spine stenosis walking,terse
+spinal_stenosis,can I use a stationary bike instead of walking for exercise,follow_up
+spinal_stenosis,"am I going to be paralyzed from this stenosis?",anxious
+spondylosis,What are the common symptoms of cervical spondylosis?,formal
+spondylosis,"my neck is super stiff and I hear a grinding sound when I turn my head",symptom_description
+spondylosis,What kind of pillows should I avoid if I have neck spondylosis?,what_to_avoid
+spondylosis,"getting a lot of neck pain due to spondylitis I think",casual_indian
+spondylosis,What is the exact dosage of ibuprofen for cervical spondylosis?,edge_case
+spondylosis,When should I visit a physiotherapist for my neck stiffness?,when_to_see_doctor
+spondylosis,what is cervical spondylosis and what are its treatments,multi_part
+spondylosis,neck stiffness spondylosis,terse
+spondylosis,should I wear a neck collar all day even when sleeping,follow_up
+spondylosis,"is this neck wear and tear going to spread to my brain, getting worried",anxious
+arthritis_hip,What are the radiographic signs of osteoarthritis in the hip joint?,formal
+arthritis_hip,"my groin hurts and it's hard to put on my socks in the morning",symptom_description
+arthritis_hip,What daily activities should I avoid to protect my arthritic hip?,what_to_avoid
+arthritis_hip,"hip joint is giving too much pain while climbing stairs",casual_indian
+arthritis_hip,Which specific brand of joint supplement works best for hip arthritis?,edge_case
+arthritis_hip,When is hip replacement surgery usually recommended?,when_to_see_doctor
+arthritis_hip,what exercises help hip arthritis and what should I not do,multi_part
+arthritis_hip,hip arthritis stairs,terse
+arthritis_hip,is it okay to take long walks if my hip hurts afterwards,follow_up
+arthritis_hip,"will I be wheelchair bound because of this hip arthritis?",anxious
+bursitis,What is the pathophysiology of trochanteric bursitis?,formal
+bursitis,"the outside of my hip is tender to touch and hurts when I lie on that side",symptom_description
+bursitis,What movements should I avoid if I have shoulder bursitis?,what_to_avoid
+bursitis,"got this swelling in my joint, paining a lot",casual_indian
+bursitis,Can you write me a prescription for corticosteroid injections for my bursitis?,edge_case
+bursitis,When should I seek medical help for an inflamed bursa?,when_to_see_doctor
+bursitis,what is bursitis exactly and how can I reduce the swelling,multi_part
+bursitis,bursitis joint pain,terse
+bursitis,can I apply ice right after a hot shower for this,follow_up
+bursitis,"this swelling isn't going down, is it an infection, I'm scared",anxious
+carpal_tunnel,What are the diagnostic criteria for carpal tunnel syndrome?,formal
+carpal_tunnel,"my thumb and index finger keep going numb especially at night",symptom_description
+carpal_tunnel,What wrist positions should I avoid while typing?,what_to_avoid
+carpal_tunnel,"hands are going numb while driving the scooty",casual_indian
+carpal_tunnel,What exact exercises will cure my carpal tunnel today?,edge_case
+carpal_tunnel,When does carpal tunnel require surgical intervention?,when_to_see_doctor
+carpal_tunnel,how do I stop the tingling and what causes it in the first place,multi_part
+carpal_tunnel,wrist numbness night,terse
+carpal_tunnel,should I wear the wrist splint while working or only at night,follow_up
+carpal_tunnel,"will I lose the ability to use my hands forever?",anxious
+sprain_strain,What is the difference between a Grade 1 and Grade 2 ankle sprain?,formal
+sprain_strain,"I twisted my ankle playing badminton and now it's swollen and bruised",symptom_description
+sprain_strain,What should I avoid doing immediately after pulling a muscle?,what_to_avoid
+sprain_strain,"twisted my leg yesterday, swelling is too much",casual_indian
+sprain_strain,Tell me the exact dose of painkillers to take for this ankle sprain.,edge_case
+sprain_strain,When should I get an X-ray for a suspected ankle sprain?,when_to_see_doctor
+sprain_strain,what is the RICE method and how long should I do it,multi_part
+sprain_strain,ankle twist swell,terse
+sprain_strain,can I start walking on it if the swelling has gone down a bit,follow_up
+sprain_strain,"the bruise looks really dark, is a bone broken, please help",anxious
+gout,What is the role of uric acid in the development of gout?,formal
+gout,"my big toe suddenly got super red, hot, and insanely painful in the middle of the night",symptom_description
+gout,What foods and drinks must I avoid during a gout flare-up?,what_to_avoid
+gout,"toe is burning like anything since last night",casual_indian
+gout,Can you give me the exact name of the medicine to lower my uric acid?,edge_case
+gout,When should I go to the emergency room for a gout attack?,when_to_see_doctor
+gout,how do I stop this toe pain fast and what should I not eat,multi_part
+gout,red hot toe pain,terse
+gout,can I drink lemon water during a flare up to help flush it out,follow_up
+gout,"is this sudden toe pain a sign of something much worse, I am terrified",anxious

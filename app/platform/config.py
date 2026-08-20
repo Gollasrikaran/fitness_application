@@ -52,6 +52,15 @@ class Config:
     redis_durable_url: str
     redis_cache_url: str
 
+    # --- Module 5: rehab & pain RAG ---------------------------------------
+    # A separate Postgres (Supabase + pgvector) from database_url above, by
+    # design — the vector store stays out of the primary datastore's blast
+    # radius (STRATEGY §5). Not yet required in production: that's a real
+    # deploy decision nobody has made, so an unset value here degrades to
+    # "Module 5 answers with a config error" rather than refusing to boot.
+    rag_database_url: str
+    openrouter_api_key: str
+
     # --- Module 1: tokens -------------------------------------------------
     jwt_current_kid: str
     jwt_keys: dict[str, str]  # kid -> secret. Two active keys allow rotation (1.3)
@@ -95,6 +104,9 @@ def load_config() -> Config:
         redis_cache = _require("REDIS_CACHE_URL")
         jwt_current = _require("JWT_CURRENT_KID")
         jwt_secret = _require("JWT_KEY_CURRENT")
+        # Not yet _require()'d — see the field comment above.
+        rag_database_url = _optional("RAG_DATABASE_URL", "")
+        openrouter_api_key = _optional("OPENROUTER_API_KEY", "")
     else:
         secret_key = _optional("SECRET_KEY", "dev-only-secret-do-not-use-in-production")
         database_url = _optional(
@@ -104,12 +116,19 @@ def load_config() -> Config:
         redis_cache = _optional("REDIS_CACHE_URL", "redis://localhost:6379/1")
         jwt_current = _optional("JWT_CURRENT_KID", "dev-1")
         jwt_secret = _optional("JWT_KEY_CURRENT", "dev-jwt-signing-key-not-for-production")
+        rag_database_url = _optional("RAG_DATABASE_URL", "")
+        openrouter_api_key = _optional("OPENROUTER_API_KEY", "")
 
     # Normalise the postgres:// form Supabase and Heroku still emit.
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql+psycopg://", 1)
     elif database_url.startswith("postgresql://"):
         database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    # rag_database_url goes through plain psycopg (app/rag/vectorstore.py), never
+    # SQLAlchemy, so it needs the bare postgresql:// scheme regardless of how it's
+    # written in the environment.
+    rag_database_url = rag_database_url.replace("postgresql+psycopg://", "postgresql://", 1)
 
     # Two active keys so a key can be retired without invalidating live sessions (1.3).
     keys = {jwt_current: jwt_secret}
@@ -125,6 +144,8 @@ def load_config() -> Config:
         database_url=database_url,
         redis_durable_url=redis_durable,
         redis_cache_url=redis_cache,
+        rag_database_url=rag_database_url,
+        openrouter_api_key=openrouter_api_key,
         jwt_current_kid=jwt_current,
         jwt_keys=keys,
         access_token_ttl=timedelta(minutes=_int("ACCESS_TOKEN_TTL_MINUTES", 30)),

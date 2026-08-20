@@ -197,20 +197,20 @@ tailwind.config = { theme: { extend: {
 
 <!-- ════════ CHAT (design only) ════════ -->
 <section id="s-chat" class="screen">
-  <div class="max-w-md mx-auto px-container-margin pt-lg">
+  <div class="max-w-md mx-auto px-container-margin pt-lg pb-52">
     <h2 class="font-display-lg-mobile text-display-lg-mobile text-on-surface">Rehab &amp; Pain</h2>
     <p class="font-body-md text-body-md text-on-surface-variant mt-xs max-w-[280px]">Ask about your recovery or describe any discomfort.</p>
-    <div class="mt-xs inline-flex items-center gap-xs bg-surface-container-low px-sm py-xs rounded-full">
+    <div id="c-quota" class="mt-xs inline-flex items-center gap-xs bg-surface-container-low px-sm py-xs rounded-full">
       <span class="material-symbols-outlined text-primary text-[18px]" style="font-variation-settings:'FILL' 1">bolt</span>
-      <span class="font-label-bold text-label-bold text-on-surface">5/5 questions</span>
+      <span id="c-quota-text" class="font-label-bold text-label-bold text-on-surface">–/– questions</span>
       <span class="font-label-sm text-label-sm text-on-surface-variant ml-1">remaining today</span>
     </div>
-    <div class="mt-lg flex flex-col gap-md">
-      <div class="self-end max-w-[85%]">
-        <div class="bg-primary-container text-on-primary-container rounded-2xl rounded-tr-sm px-md py-sm">
-          <p class="font-body-md text-body-md">My lower back feels tight. Should I stretch or rest?</p>
-        </div>
-      </div>
+
+    <div id="c-referred" class="hidden mt-lg bg-surface-container-lowest ambient-shadow rounded-lg p-lg">
+      <p id="c-referred-msg" class="font-body-md text-body-md text-on-surface-variant"></p>
+    </div>
+
+    <div id="c-thread" class="mt-lg flex flex-col gap-md">
       <div class="self-start max-w-[90%]">
         <div class="flex items-end gap-xs mb-1">
           <div class="w-6 h-6 rounded-full bg-primary flex items-center justify-center">
@@ -219,9 +219,21 @@ tailwind.config = { theme: { extend: {
           <span class="font-label-sm text-label-sm text-on-surface-variant">Coach AI</span>
         </div>
         <div class="bg-surface-container-lowest ambient-shadow rounded-2xl rounded-tl-sm p-md">
-          <p class="font-body-md text-body-md text-on-surface-variant italic">Not connected yet. When it is, any exercise it mentions will come from your reviewed list — it will never invent one.</p>
+          <p class="font-body-md text-body-md text-on-surface-variant">Ask me about your recovery — I'll answer using reviewed information only. Any exercise I mention still comes from your reviewed list; I won't invent one.</p>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div id="c-composer" class="fixed bottom-[120px] left-0 right-0 z-40 bg-surface-container-lowest border-t border-outline-variant/20">
+    <div class="max-w-md mx-auto px-container-margin py-sm flex items-end gap-sm">
+      <textarea id="c-input" rows="1" placeholder="Describe what you're feeling…"
+        onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); sendChat();}"
+        class="flex-1 resize-none rounded-2xl px-md py-sm bg-surface-container-low font-body-md text-body-md text-on-surface outline-none"></textarea>
+      <button id="c-send" onclick="sendChat()"
+        class="w-11 h-11 flex-shrink-0 rounded-full bg-primary text-on-primary flex items-center justify-center active:scale-90 duration-200 disabled:opacity-40">
+        <span class="material-symbols-outlined">arrow_upward</span>
+      </button>
     </div>
   </div>
 </section>
@@ -357,6 +369,7 @@ function go(name) {
   });
   window.scrollTo(0,0);
   if (name === "home") loadHome();
+  if (name === "chat") loadChat();
   if (name === "videos") loadVideos();
   if (name === "profile") loadProfile();
 }
@@ -779,6 +792,170 @@ function startDemoLoop(videos) {
       if (el) el.src = v.demo_images[i % v.demo_images.length];
     });
   }, 900);
+}
+
+// ── chat (Module 5) ──
+let CHAT_INITED = false;
+
+async function loadChat() {
+  let q;
+  try {
+    q = await api("GET", "/v1/rehab/quota");
+  } catch (e) {
+    toast(e.message, true);
+    return;
+  }
+  renderQuota(q);
+
+  if (q.referred) {
+    $("c-referred-msg").textContent = q.referral_message;
+    $("c-referred").className = "mt-lg bg-surface-container-lowest ambient-shadow rounded-lg p-lg";
+    $("c-composer").className = "hidden";
+  } else {
+    $("c-referred").className = "hidden";
+    $("c-composer").className = "fixed bottom-[120px] left-0 right-0 z-40 bg-surface-container-lowest border-t border-outline-variant/20";
+  }
+  CHAT_INITED = true;
+}
+
+function renderQuota(q) {
+  $("c-quota-text").textContent = `${q.remaining}/${q.limit} questions`;
+}
+
+// Minimal, escape-first markdown-lite formatter for bot replies — the LLM's
+// output uses **bold** headers, "- " bullet lists, and blank-line paragraph
+// breaks, none of which survive plain textContent (HTML collapses newlines).
+// Escaping BEFORE any tag-generation means nothing in the model's own text can
+// ever inject real markup, no matter what it contains.
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function formatBotText(text) {
+  const bold = escapeHtml(text).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  return bold.split(/\n\s*\n/).map(formatBotBlock).join("");
+}
+
+function formatBotBlock(block) {
+  const lines = block.split("\n").map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return "";
+  const bulletIdx = lines.findIndex(l => /^[-*]\s+/.test(l));
+  if (bulletIdx === -1) return `<p class="mb-2">${lines.join("<br>")}</p>`;
+
+  const before = lines.slice(0, bulletIdx);
+  const bulletLines = lines.slice(bulletIdx).filter(l => /^[-*]\s+/.test(l));
+  const after = lines.slice(bulletIdx + bulletLines.length).filter(l => !/^[-*]\s+/.test(l));
+
+  let html = "";
+  if (before.length) html += `<p class="mb-1">${before.join("<br>")}</p>`;
+  html += `<ul class="list-disc pl-5 space-y-1 mb-2">${
+    bulletLines.map(l => `<li>${l.replace(/^[-*]\s+/, "")}</li>`).join("")}</ul>`;
+  if (after.length) html += `<p class="mb-2">${after.join("<br>")}</p>`;
+  return html;
+}
+
+function appendChatBubble(text, fromUser) {
+  const wrap = document.createElement("div");
+  wrap.className = fromUser ? "self-end max-w-[85%]" : "self-start max-w-[90%]";
+  wrap.innerHTML = fromUser
+    ? `<div class="bg-primary-container text-on-primary-container rounded-2xl rounded-tr-sm px-md py-sm">
+         <p class="font-body-md text-body-md"></p></div>`
+    : `<div class="flex items-end gap-xs mb-1">
+         <div class="w-6 h-6 rounded-full bg-primary flex items-center justify-center">
+           <span class="material-symbols-outlined text-on-primary text-[14px]" style="font-variation-settings:'FILL' 1">smart_toy</span>
+         </div>
+         <span class="font-label-sm text-label-sm text-on-surface-variant">Coach AI</span>
+       </div>
+       <div class="bg-surface-container-lowest ambient-shadow rounded-2xl rounded-tl-sm p-md">
+         <div class="chat-content font-body-md text-body-md text-on-surface-variant"></div>
+       </div>`;
+  if (fromUser) {
+    wrap.querySelector("p").textContent = text;
+  } else {
+    wrap.querySelector(".chat-content").innerHTML = formatBotText(text);
+  }
+  $("c-thread").appendChild(wrap);
+  wrap.scrollIntoView({behavior: "smooth", block: "end"});
+}
+
+async function sendChat() {
+  const input = $("c-input");
+  const question = input.value.trim();
+  if (!question) return;
+  input.value = "";
+  $("c-send").disabled = true;
+  appendChatBubble(question, true);
+  await runQuery(question, null);
+  $("c-send").disabled = false;
+}
+
+// confirmation is null for a fresh message, or {code: "..."|null} when the
+// user just tapped a condition-choice chip (5.6) — null code means "decline,
+// answer anyway without adding a condition."
+async function runQuery(question, confirmation) {
+  try {
+    const body = confirmation !== null
+      ? {question, condition_confirmation: confirmation}
+      : {question};
+    const d = await api("POST", "/v1/rehab/query", body);
+    renderChatResponse(d);
+  } catch (e) {
+    if (e.status === 429) {
+      // Two distinct 429s: real quota exhaustion ("come back tomorrow") vs the
+      // LLM provider being temporarily rate-limited ("try again in a moment,
+      // not counted against you"). The server already picks the right message
+      // for which one happened — show that, not a guess.
+      appendChatBubble(e.message, false);
+      // The error body carries no quota field, so re-fetch it directly rather
+      // than leave the badge showing a stale count until the next page load.
+      try { renderQuota(await api("GET", "/v1/rehab/quota")); } catch (_) {}
+    } else {
+      toast(e.message, true);
+    }
+  }
+}
+
+function renderChatResponse(d) {
+  if (d.quota) renderQuota(d.quota);
+
+  if (d.referred) {
+    appendChatBubble(d.message, false);
+    $("c-referred-msg").textContent = d.message;
+    $("c-referred").className = "mt-lg bg-surface-container-lowest ambient-shadow rounded-lg p-lg";
+    $("c-composer").className = "hidden";
+    return;
+  }
+
+  if (d.needs_condition_selection) {
+    appendChatBubble(d.condition_options.prompt_text, false);
+    appendConditionChoices(d.condition_options);
+    return;
+  }
+
+  appendChatBubble(d.answer, false);
+}
+
+// 5.6 — the model only ever suggests a condition match; recording it always
+// requires this explicit tap, never happening automatically from the message.
+function appendConditionChoices(opts) {
+  const wrap = document.createElement("div");
+  wrap.className = "self-start max-w-[90%] flex flex-wrap gap-xs mt-1";
+
+  const makeChip = (label, code) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.className = "px-md py-sm rounded-full font-label-sm text-label-sm border border-primary-fixed bg-primary-fixed/10 text-on-primary-fixed-variant active:scale-95 transition-transform disabled:opacity-40";
+    b.onclick = async () => {
+      wrap.querySelectorAll("button").forEach(x => x.disabled = true);
+      await runQuery(opts.original_question, {code});
+    };
+    return b;
+  };
+
+  wrap.appendChild(makeChip(opts.matched_label, opts.matched_code));
+  wrap.appendChild(makeChip("Something else / not sure", null));
+  $("c-thread").appendChild(wrap);
+  wrap.scrollIntoView({behavior: "smooth", block: "end"});
 }
 
 // ── profile ──
