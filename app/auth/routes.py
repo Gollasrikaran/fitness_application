@@ -7,6 +7,7 @@ from app.auth import service
 from app.gateway.middleware import enforce_preauth_rate_limits, require_auth
 from app.platform.db import session_scope
 from app.platform.errors import ValidationError
+from app.platform.mailer import send_email
 
 bp = Blueprint("auth", __name__, url_prefix="/v1/auth")
 
@@ -16,6 +17,18 @@ def _body() -> dict:
     if not isinstance(data, dict):
         raise ValidationError("Expected a JSON object body.")
     return data
+
+
+def _str_field(d: dict, key: str, default: str = "") -> str:
+    """Found live (third-pass code audit): `d.get(key, default)` only applies
+    the default when the key is ABSENT — an explicit JSON null for the key
+    (e.g. {"email": null}) sails straight through as None, and every caller
+    here immediately calls .strip()/.lower() on the result, raising an
+    uncaught AttributeError (a 500) instead of a clean validation error. Same
+    bug class already fixed in app/profile/routes.py's own _str_field; this
+    is that fix applied to auth's fields, which never went through it."""
+    value = d.get(key, default)
+    return value if isinstance(value, str) else default
 
 
 def _device_id() -> str:
@@ -52,13 +65,16 @@ def signup():
     with session_scope() as session:
         user, pair, verify_token = service.signup(
             session, cfg,
-            email=data.get("email", ""),
-            password=data.get("password", ""),
+            email=_str_field(data, "email"),
+            password=_str_field(data, "password"),
             device_id=_device_id(),
         )
-        # TODO(Module 8): hand `verify_token` to the mailer. Logged in dev only.
-        if not cfg.is_production:
-            current_app.logger.info("email verification token: %s", verify_token)
+        send_email(
+            to=user.email,
+            subject="Verify your ViTAinspire email",
+            body=f"Your verification token: {verify_token}",
+            is_production=cfg.is_production,
+        )
         return _pair_response(pair, status=201, user_id=user.id)
 
 
@@ -70,8 +86,8 @@ def login():
     with session_scope() as session:
         _, pair = service.login(
             session, cfg,
-            email=data.get("email", ""),
-            password=data.get("password", ""),
+            email=_str_field(data, "email"),
+            password=_str_field(data, "password"),
             device_id=_device_id(),
         )
         return _pair_response(pair)
@@ -80,11 +96,20 @@ def login():
 @bp.post("/refresh")
 def refresh():
     """Silent renewal (11.1). Sliding expiry means an active user never sees a
-    login screen again after signup (1.4)."""
+    login screen again after signup (1.4).
+
+    enforce_preauth_rate_limits() added (found live, code audit): every
+    other pre-auth endpoint calls it; this one didn't, leaving a full DB
+    round trip per call completely unthrottled — plus, since
+    rotate_refresh_token now takes a row lock (see tokens.py), an
+    unthrottled flood here is also a plausible DB lock-contention vector.
+    """
+    enforce_preauth_rate_limits()
     data = _body()
-    raw = data.get("refresh_token", "").strip()
-    if not raw:
+    raw = data.get("refresh_token")
+    if not isinstance(raw, str) or not raw.strip():
         raise ValidationError("refresh_token is required.")
+    raw = raw.strip()
     cfg = current_app.config["APP_CONFIG"]
     with session_scope() as session:
         _, pair = service.refresh(session, cfg, raw, _device_id())
@@ -95,19 +120,31 @@ def refresh():
 @require_auth
 def logout():
     data = request.get_json(silent=True) or {}
+    # Found live while fixing the same bug class elsewhere in this file:
+    # refresh_token is optional here, but a present-and-non-string value
+    # (e.g. {"refresh_token": 123}) reached tk.hash_token's raw.encode() call
+    # uncaught — same "silent-default doesn't cover an explicit wrong type"
+    # pattern as _str_field above, just for an Optional field.
+    raw_refresh = data.get("refresh_token")
+    if raw_refresh is not None and not isinstance(raw_refresh, str):
+        raise ValidationError("refresh_token must be a string.")
     with session_scope() as session:
-        service.logout(session, g.access_claims, data.get("refresh_token"))
+        service.logout(session, g.access_claims, raw_refresh)
     return jsonify({"status": "signed_out"})
 
 
 @bp.post("/verify-email")
 def verify_email():
+    """enforce_preauth_rate_limits() added (found live, code audit): the
+    only pre-auth endpoint that skipped it besides /refresh (now also
+    fixed) — an inconsistent, unthrottled gap in the pre-auth surface."""
+    enforce_preauth_rate_limits()
     data = _body()
-    token = data.get("token", "").strip()
-    if not token:
+    token = data.get("token")
+    if not isinstance(token, str) or not token.strip():
         raise ValidationError("token is required.")
     with session_scope() as session:
-        service.verify_email(session, token)
+        service.verify_email(session, token.strip())
     return jsonify({"status": "verified"})
 
 
@@ -116,10 +153,16 @@ def password_reset_request():
     enforce_preauth_rate_limits()
     data = _body()
     cfg = current_app.config["APP_CONFIG"]
+    email = _str_field(data, "email")
     with session_scope() as session:
-        raw = service.request_password_reset(session, data.get("email", ""))
-        if raw and not cfg.is_production:
-            current_app.logger.info("password reset token: %s", raw)
+        raw = service.request_password_reset(session, email)
+        if raw:
+            send_email(
+                to=email,
+                subject="Reset your ViTAinspire password",
+                body=f"Your password reset token: {raw}",
+                is_production=cfg.is_production,
+            )
     # Identical response either way — otherwise this is an enumeration oracle (1.9).
     return jsonify({"status": "ok", "message": service.RESET_ACK})
 
@@ -132,8 +175,8 @@ def password_reset_confirm():
     with session_scope() as session:
         service.confirm_password_reset(
             session, cfg,
-            raw_token=data.get("token", "").strip(),
-            new_password=data.get("password", ""),
+            raw_token=_str_field(data, "token").strip(),
+            new_password=_str_field(data, "password"),
         )
     return jsonify({"status": "password_updated"})
 
@@ -147,8 +190,8 @@ def change_password():
     with session_scope() as session:
         service.change_password(
             session, cfg, g.user_id,
-            current_password=data.get("current_password", ""),
-            new_password=data.get("new_password", ""),
+            current_password=_str_field(data, "current_password"),
+            new_password=_str_field(data, "new_password"),
         )
     return jsonify({"status": "password_updated"})
 
@@ -159,6 +202,12 @@ account_bp = Blueprint("account", __name__, url_prefix="/v1")
 @account_bp.delete("/account")
 @require_auth
 def delete_account():
+    # Found live (third-pass code audit): a valid session used to be enough
+    # on its own for the most destructive action in the app — now requires
+    # re-confirming the current password too, the same way change_password
+    # already does.
+    data = _body()
+    cfg = current_app.config["APP_CONFIG"]
     with session_scope() as session:
-        service.delete_account(session, g.user_id)
+        service.delete_account(session, cfg, g.user_id, password=_str_field(data, "password"))
     return jsonify({"status": "deletion_scheduled"})

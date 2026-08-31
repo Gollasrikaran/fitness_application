@@ -15,3 +15,14 @@ pydantic==2.9.2
 pytest==8.3.3
 pytest-flask==1.3.0
 requests==2.32.3
+# Found live (fourth-pass audit): app/platform/redis_clients.py imports this
+# at runtime for its dev-mode in-memory Redis fallback (active whenever
+# FLASK_ENV != production) — it was never listed here, so it only worked by
+# coincidence on machines that happened to already have it installed
+# globally. A genuinely fresh `pip install -r requirements.txt` (exactly what
+# Railway's builder runs) would crash at boot with ModuleNotFoundError the
+# first time a non-production environment started without a real Redis
+# attached. Listed here (not above) since it's never imported at all when
+# FLASK_ENV=production — installing it in every environment is harmless,
+# same reasoning as pytest/requests below it.
+fakeredis==2.37.0

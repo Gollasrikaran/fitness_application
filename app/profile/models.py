@@ -159,6 +159,18 @@ class UserProgram(Base):
 
     target_sets: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     target_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    # RLM design doc — the weekly curve's real, continuous tracking value,
+    # separate from target_amount above (which is always snapped to a real
+    # prescribable number — whole reps, whole-ish seconds). Found live: a
+    # rep-based exercise's real step (e.g. 2 reps) is often bigger than a
+    # single week's growth (~10%), so rounding target_amount itself back down
+    # every week erased the small gain permanently and could stall forever at
+    # 100% adherence. This column keeps growing by the real percentage even
+    # while target_amount stays flat, so partial progress accumulates instead
+    # of resetting — see app/progression/service.py's _volume_bounds. NULL
+    # until the weekly job or an escalation first touches this entry; falls
+    # back to target_amount until then.
+    internal_target_amount: Mapped[float | None] = mapped_column(Numeric(12, 6))
     unit: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="template")

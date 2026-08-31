@@ -90,3 +90,14 @@ def key_login_failures(user_id: str) -> str:
     """Per-account failed-login counter (1.2). IP and device keys are
     attacker-controlled; this one is not."""
     return f"login:fail:{user_id}"
+
+
+def key_login_failures_by_email(email: str) -> str:
+    """Same purpose as key_login_failures, but keyed by the attempted email
+    itself — used only when no account exists for it. Found live (third-pass
+    code audit): without this, only a REAL account could ever accumulate
+    failures and eventually get locked out (429). An attacker repeatedly
+    guessing a nonexistent email always got a plain 401 instead, no matter
+    how many attempts — letting them tell "exists" from "doesn't exist"
+    purely by which status code eventually showed up, regardless of timing."""
+    return f"login:fail:email:{email}"

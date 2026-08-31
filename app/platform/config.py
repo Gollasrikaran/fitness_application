@@ -15,6 +15,17 @@ class ConfigError(RuntimeError):
     """Raised at boot when required configuration is absent or invalid."""
 
 
+# Found live (code audit): FLASK_ENV was read with a plain default and compared
+# by exact string equality with nothing validating it against this set. Unset,
+# misspelled, or wrong-case ("Production", "PROD", "staging", a trailing
+# space) all silently fell through to the dev branch below — hardcoded dev
+# secrets, hardcoded dev JWT key, the internal devconsole blueprint mounted
+# unauthenticated (see app/factory.py), debug-level logging. This one variable
+# controls the entire production security posture, so an unrecognized value
+# must refuse to boot, not silently degrade.
+_VALID_ENVS = {"development", "test", "production"}
+
+
 def _require(name: str) -> str:
     val = os.environ.get(name, "").strip()
     if not val:
@@ -61,6 +72,14 @@ class Config:
     rag_database_url: str
     openrouter_api_key: str
 
+    # --- RLM (Implementation_RLM_plan.md Phase 7) -------------------------
+    # Independent flags so the silent backend curve (Phase 2) can ship without
+    # waiting on the LLM-facing chat analysis (Phase 3/4/5), and either half
+    # can be switched off on its own if something needs investigating —
+    # without touching code, per the plan's own rollout guidance.
+    rlm_weekly_progression_enabled: bool
+    rlm_chat_analysis_enabled: bool
+
     # --- Module 1: tokens -------------------------------------------------
     jwt_current_kid: str
     jwt_keys: dict[str, str]  # kid -> secret. Two active keys allow rotation (1.3)
@@ -84,13 +103,42 @@ class Config:
     timezone: str = "Asia/Kolkata"   # single market (3.3)
     min_age: int = 18                # 18+ only (Out of Scope 17)
 
+    # --- Devconsole (found live, code audit) -------------------------------
+    # factory.py's `if not cfg.is_production` gate is necessary but not
+    # sufficient: "development" and "test" are both legitimate non-prod
+    # FLASK_ENV values, so a box deliberately or accidentally started with
+    # either, but still network-reachable, would leave devconsole wide open
+    # with no login of its own. Blank password = devconsole refuses every
+    # request outright (fail closed) rather than silently allowing access —
+    # see app/devconsole/routes.py's before_request hook.
+    devconsole_user: str = "admin"
+    devconsole_password: str = ""
+
     @property
     def is_production(self) -> bool:
         return self.env == "production"
 
 
 def load_config() -> Config:
-    env = _optional("FLASK_ENV", "development")
+    # No default (found live, code audit): a silent "development" fallback
+    # meant forgetting to set FLASK_ENV anywhere — a fresh deploy, a
+    # container image missing the var, a copy-pasted env file with the line
+    # dropped — silently ran with dev secrets, the dev JWT key, and
+    # devconsole exposed, with no signal anything was wrong. Every real
+    # invocation path already sets this explicitly (run.ps1 sources
+    # .env.dev, tests/conftest.py sets it directly, the scheduled-job
+    # wrapper sets it directly) — requiring it turns "forgot to set this
+    # somewhere new" into an immediate boot failure everywhere, not a
+    # silent security downgrade on whichever context happens to be real
+    # production.
+    env = _require("FLASK_ENV")
+    if env not in _VALID_ENVS:
+        raise ConfigError(
+            f"FLASK_ENV={env!r} is not a recognized environment (expected one "
+            f"of {sorted(_VALID_ENVS)}). Refusing to boot with an ambiguous "
+            "environment, since it silently controls the entire production "
+            "security posture (secrets, JWT signing key, devconsole exposure)."
+        )
     is_prod = env == "production"
 
     if is_prod:
@@ -119,6 +167,19 @@ def load_config() -> Config:
         rag_database_url = _optional("RAG_DATABASE_URL", "")
         openrouter_api_key = _optional("OPENROUTER_API_KEY", "")
 
+    # Found live (code audit): nothing enforced this file's own architectural
+    # rule (STRATEGY §6) that the durable store and the evictable cache must
+    # never share an instance — a copy-paste misconfiguration pointing both
+    # at the same Redis would let allkeys-lru eviction silently delete a
+    # revocation-denylist entry under memory pressure, making a revoked/
+    # logged-out token valid again with no code-level signal anything is wrong.
+    if redis_durable == redis_cache:
+        raise ConfigError(
+            "REDIS_DURABLE_URL and REDIS_CACHE_URL must not be the same value. "
+            "The durable store (revocation denylist, rate limits) must never "
+            "share an instance with the evictable cache (STRATEGY §6)."
+        )
+
     # Normalise the postgres:// form Supabase and Heroku still emit.
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql+psycopg://", 1)
@@ -146,6 +207,10 @@ def load_config() -> Config:
         redis_cache_url=redis_cache,
         rag_database_url=rag_database_url,
         openrouter_api_key=openrouter_api_key,
+        rlm_weekly_progression_enabled=_optional(
+            "RLM_WEEKLY_PROGRESSION_ENABLED", "true").lower() == "true",
+        rlm_chat_analysis_enabled=_optional(
+            "RLM_CHAT_ANALYSIS_ENABLED", "true").lower() == "true",
         jwt_current_kid=jwt_current,
         jwt_keys=keys,
         access_token_ttl=timedelta(minutes=_int("ACCESS_TOKEN_TTL_MINUTES", 30)),
@@ -159,4 +224,6 @@ def load_config() -> Config:
         rl_user_per_minute=_int("RL_USER_PER_MINUTE", 120),
         rl_device_per_hour=_int("RL_DEVICE_PER_HOUR", 60),
         rl_ip_per_hour=_int("RL_IP_PER_HOUR", 200),
+        devconsole_user=_optional("DEVCONSOLE_USER", "admin"),
+        devconsole_password=_optional("DEVCONSOLE_PASSWORD", ""),
     )

@@ -9,12 +9,50 @@ Registered only when FLASK_ENV != production. The product UI is a mobile app
 """
 from __future__ import annotations
 
+import secrets
 from pathlib import Path
 
-from flask import Blueprint, abort, render_template, send_from_directory
+from flask import Blueprint, Response, abort, current_app, render_template, request, send_from_directory
 
 bp = Blueprint("devconsole", __name__,
                template_folder="templates", static_folder="static")
+
+
+@bp.before_request
+def _require_devconsole_auth():
+    """Independent auth layer (found live, code audit): the ONLY thing ever
+    gating this whole blueprint was `if not cfg.is_production` in
+    factory.py. Requiring FLASK_ENV to be set explicitly (config.py) closes
+    "forgot to set it, silently defaulted to dev" — but "development" and
+    "test" are both legitimate non-production values, so a deliberate or
+    accidental FLASK_ENV=test on a reachable box (a staging URL, a preview
+    deploy) would still leave this entire blueprint open with zero login of
+    its own: /app is a full working clone of the mobile client wired to the
+    real signup/login/refresh/logout endpoints, and /dev logs raw
+    request/response bodies, tokens included.
+
+    HTTP Basic Auth specifically because every route here is meant to be
+    opened directly in a browser by typing a URL — a header/query-param
+    token scheme would need custom tooling just to view a page; a browser
+    handles a Basic Auth prompt natively.
+
+    Fails CLOSED: if DEVCONSOLE_PASSWORD isn't configured, every request
+    here is refused outright, not silently let through.
+    """
+    cfg = current_app.config["APP_CONFIG"]
+    if not cfg.devconsole_password:
+        abort(403, "devconsole is not configured for this environment (DEVCONSOLE_PASSWORD unset).")
+    auth = request.authorization
+    valid = (
+        auth is not None
+        and secrets.compare_digest(auth.username or "", cfg.devconsole_user)
+        and secrets.compare_digest(auth.password or "", cfg.devconsole_password)
+    )
+    if not valid:
+        return Response(
+            "Authentication required.", 401,
+            {"WWW-Authenticate": 'Basic realm="devconsole"'},
+        )
 
 
 @bp.after_request

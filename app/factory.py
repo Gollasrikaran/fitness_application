@@ -19,6 +19,17 @@ def create_app() -> Flask:
     app = Flask(__name__)
     app.config["APP_CONFIG"] = cfg
     app.config["SECRET_KEY"] = cfg.secret_key
+    # Found live (pre-launch production readiness check): nothing capped
+    # request body size at all — every route is JSON-only with small,
+    # bounded legitimate payloads (the largest realistic one is a batch
+    # activity-log POST), so there's no legitimate reason for a multi-MB
+    # request. Without this, an unauthenticated caller could send an
+    # arbitrarily large body to any endpoint, forcing Flask to buffer all of
+    # it before a route handler (or even JSON parsing) ever runs — a cheap
+    # resource-exhaustion angle that matters a lot more once this is actually
+    # internet-reachable than it did in local dev. 1MB is generous headroom
+    # over any real request this app sends.
+    app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
 
     logging.basicConfig(
         level=logging.INFO if cfg.is_production else logging.DEBUG,
@@ -61,7 +72,16 @@ def create_app() -> Flask:
     @app.get("/")
     def index():
         """Dev-friendly root. A JSON API whose root 404s is hostile to anyone
-        poking at it in a browser; this lists what actually exists."""
+        poking at it in a browser; this lists what actually exists.
+
+        Found live (code audit): the full route listing used to run
+        unconditionally, in every environment — handing any anonymous caller
+        a complete map of the API surface (every path and method) in
+        production, with zero effort. The listing itself is now
+        non-production only; production gets a minimal, honest response.
+        """
+        if cfg.is_production:
+            return jsonify({"service": "fitness-app-api", "env": cfg.env})
         routes = []
         for rule in sorted(app.url_map.iter_rules(), key=lambda r: str(r)):
             if rule.endpoint == "static":

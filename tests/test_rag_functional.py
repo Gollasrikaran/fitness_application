@@ -15,6 +15,27 @@ def test_quota_blocks_after_daily_limit(make_user):
     assert results == [True] * DAILY_LIMIT + [False, False]
 
 
+def test_exhausted_quota_blocks_the_condition_classifier_too(make_user, client):
+    """Found live (code audit), now fixed at the root: every real message
+    consumes a quota slot immediately and unconditionally in answer_query,
+    before any classification happens — not just once a real *answer* comes
+    out. Exhausting quota first, then sending a message that would normally
+    trigger the classifier (a real symptom description) — this must be
+    refused with 429 before any billed work happens, not answered with a
+    200 needs_condition_selection response."""
+    user = make_user(condition_codes=["gout"])
+    with session_scope() as s:
+        for _ in range(DAILY_LIMIT):
+            assert _consume_quota(s, user["user_id"])
+
+    r = client.post(
+        "/v1/rehab/query",
+        json={"question": "my knee has been hurting for three weeks and it's getting worse"},
+        headers=user["headers"],
+    )
+    assert r.status_code == 429
+
+
 def test_referred_user_blocked_with_no_quota_spent(make_user, client):
     """13.3b — a refer-bucket condition gets the referral message and nothing
     else, and it must not cost a quota slot to be told that."""
@@ -30,9 +51,16 @@ def test_referred_user_blocked_with_no_quota_spent(make_user, client):
 
 
 def test_condition_disambiguation_round_trip(make_user, client):
-    """5.6 — a symptom description gets suggested condition options (costing no
-    quota), and confirming one both records the condition AND answers the
-    original question in the same round trip, for exactly one quota unit total.
+    """5.6 — a symptom description gets suggested condition options, and
+    confirming one both records the condition AND answers the original
+    question in the same round trip.
+
+    Quota accounting (found live, code audit; fixed as an explicit product
+    decision): every real message now costs one slot unconditionally,
+    including the first classify-only message — not just once a real answer
+    comes out. So this round trip costs 2 total: 1 for the message that
+    triggered condition suggestion, 1 more for the follow-up message that
+    confirms the condition and gets an actual answer.
 
     Note: this depends on the free classifier model matching "wrist hurts and
     tingles" to carpal_tunnel. It's not perfectly deterministic even at
@@ -48,7 +76,7 @@ def test_condition_disambiguation_round_trip(make_user, client):
     )
     d1 = r1.get_json()
     assert d1["needs_condition_selection"] is True, d1
-    assert d1["quota"]["used"] == 0
+    assert d1["quota"]["used"] == 1
 
     opts = d1["condition_options"]
     r2 = client.post(
@@ -62,7 +90,7 @@ def test_condition_disambiguation_round_trip(make_user, client):
     d2 = r2.get_json()
     assert d2["needs_condition_selection"] is False
     assert d2["answer"] is not None
-    assert d2["quota"]["used"] == 1
+    assert d2["quota"]["used"] == 2
 
     profile = client.get("/v1/profile", headers=user["headers"]).get_json()
     codes = {c["code"] for c in profile["conditions"]}

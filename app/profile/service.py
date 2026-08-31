@@ -6,12 +6,14 @@ no suggestions rather than unfiltered ones.
 """
 from __future__ import annotations
 
+import math
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from app.auth.models import User
 from app.catalog.models import ActivityTaxonomy, Condition, SafetyGridCell, VideoCatalog
 from app.platform.errors import Forbidden, NotFound, ValidationError
 from app.profile.models import (
@@ -26,8 +28,38 @@ REFERRAL_MESSAGE = (
     "exercises."
 )
 
+# Found live (code audit): only a floor (>=18) was ever checked, no ceiling.
+# `age` is a 4-byte Postgres Integer (models.py); an extreme Python int
+# (arbitrary precision) passed the app-level check and only failed at flush
+# with an uncaught DB error instead of a clean 422. 120 is generous — no
+# real user of this app is older than that — while still comfortably inside
+# the Integer column's range.
+MAX_AGE = 120
+
 GOALS = {"health", "fitness", "flexibility", "habit"}
 BANDS = {"beginner", "1m", "2m", "3m", "experienced"}
+
+# Found live (code audit): log_activity only ever checked amount/sets were
+# POSITIVE, with no upper bound. amount_per_set/total_volume are
+# Numeric(10,2) (max ~99,999,999.99) and sets_done is a 32-bit Integer — an
+# extreme client-supplied value overflowed the column at INSERT time,
+# raising an uncaught database error instead of a clean 422. These are hard
+# safety backstops against overflow, not a plausibility judgment — the
+# "implausible" flag (compared against each activity's own reviewed
+# plausible_max_total, or CUSTOM_MEASUREMENT_DEFAULT_MAX below) already
+# handles "is this a believable rehab log" at a much tighter threshold; this
+# just guarantees the column can physically store the value at all.
+#
+# Found live (second-pass code audit): bounding amount and sets separately
+# was NOT enough — their PRODUCT (further doubled for per_side activities)
+# can still overflow the column even when both factors are individually
+# under these caps: amount=100000, sets=1000 already gives total=1e8, over
+# the ~99,999,999.99 ceiling. MAX_TOTAL_VOLUME checks the actual computed
+# total directly, which is the only way to guarantee the INSERT that's
+# about to happen can't overflow regardless of how the two factors combine.
+MAX_LOGGABLE_AMOUNT = 100_000
+MAX_LOGGABLE_SETS = 10_000
+MAX_TOTAL_VOLUME = 99_999_999
 
 # How many activities a tier shows, sliced from the full priority-ordered,
 # already-condition-filtered list. "experienced" is None: no cap, show
@@ -83,15 +115,25 @@ def is_referred(session: Session, user_id: str) -> bool:
 def complete_onboarding(session: Session, user_id: str, *, age: int, goal: str,
                         experience_band: str, condition_codes: list[str],
                         unit_preference: str = "km") -> dict:
-    if not isinstance(age, int) or age < 18:
-        raise ValidationError("You must be 18 or over to use this app.")
+    if not isinstance(age, int) or age < 18 or age > MAX_AGE:
+        raise ValidationError(f"Age must be a whole number between 18 and {MAX_AGE}.")
     if goal not in GOALS:
         raise ValidationError(f"Goal must be one of: {', '.join(sorted(GOALS))}")
     if experience_band not in BANDS:
         raise ValidationError(f"Experience band must be one of: {', '.join(sorted(BANDS))}")
+    # Found live (code audit): unlike update_profile, this never validated
+    # unit_preference at all — an invalid value only got caught by the DB's
+    # own CheckConstraint at flush, an uncaught IntegrityError (500) instead
+    # of a clean 422.
+    if unit_preference not in UNIT_PREFERENCES:
+        raise ValidationError(f"Unit preference must be one of: {', '.join(sorted(UNIT_PREFERENCES))}")
 
     known = {c.condition_code for c in session.scalars(select(Condition)).all()}
-    codes = [c for c in (condition_codes or []) if c]
+    # Found live (code audit): duplicate codes (e.g. the same code sent
+    # twice) were never de-duplicated, unlike create_custom_exercise's own
+    # measurement_types handling — two rows with the same composite PK
+    # (user_id, condition_code) raised an uncaught IntegrityError.
+    codes = list(dict.fromkeys(c for c in (condition_codes or []) if c))
     unknown = [c for c in codes if c not in known]
     if unknown:
         # Free text can never reach here — the client picks from /v1/conditions.
@@ -131,8 +173,8 @@ def update_profile(session: Session, user_id: str, *, fields: dict) -> dict:
 
     if "age" in fields:
         age = fields["age"]
-        if not isinstance(age, int) or age < 18:
-            raise ValidationError("You must be 18 or over to use this app.")
+        if not isinstance(age, int) or age < 18 or age > MAX_AGE:
+            raise ValidationError(f"Age must be a whole number between 18 and {MAX_AGE}.")
         prof.age = age
 
     if "goal" in fields:
@@ -181,21 +223,84 @@ def _modified_activities(session: Session, user_id: str) -> dict[str, str]:
 
 
 def build_program(session: Session, user_id: str) -> list[dict]:
-    """Seed the program from the taxonomy baselines, minus anything `avoid`."""
+    """Seed the program from the taxonomy baselines, minus anything `avoid` —
+    and, for a user who already has a program, RECONCILE against the current
+    condition set rather than blindly wiping it.
+
+    Found live (this session, traced from a user question about chat-confirmed
+    conditions): the old version unconditionally deleted every UserProgram row
+    and recreated all of them from taxonomy DEFAULTS, every single time this
+    ran — including every re-run from complete_onboarding, which fires not
+    just at first signup but also from the profile editor and from
+    app.rag.service._add_condition (a user casually confirming an unrelated
+    symptom mid-conversation). That meant weeks of real, earned progression on
+    every OTHER exercise silently reset to day-one numbers any time a
+    condition changed, even one wholly unrelated to that exercise. Reproduced
+    live: glute_bridge progressed from a 5.00 baseline to 6.00 via
+    apply_escalation, then confirming an unrelated condition (sprain_strain)
+    reset it straight back to 5.00.
+
+    New behavior: an activity with NO existing row is seeded fresh from the
+    taxonomy baseline exactly as before (this is what makes first-time
+    onboarding — where nothing exists yet — behave identically to the old
+    code). An activity that already has a row is left completely untouched —
+    same target_sets/target_amount, same status — UNLESS the current
+    condition set just made it unsafe (`avoid`), in which case it's
+    soft-suspended (the same convention remove_program_entry already uses),
+    never deleted, so its history and progress are preserved rather than lost
+    outright. A `user_override` entry (the user explicitly confirmed they
+    want it despite a KNOWN risk, see add_program_entry) is left active even
+    if a newly added condition also flags it — that's a deliberate, already-
+    informed choice, not something a background condition change should
+    silently reverse.
+
+    Found live (fourth-pass audit): the block direction alone left a real
+    gap — nothing ever reversed it. Remove the condition that made an entry
+    unsafe, and it stayed suspended forever with no automatic path back,
+    even though the reason it was suspended no longer applies. Now also
+    resurrects: an entry suspended_reason="condition_safety" (a SYSTEM
+    suspension, never a user's own remove_program_entry call — that reason
+    is "user_removed" and must stay untouched here, see get_program's own
+    comment on why a manual removal must never be silently backfilled) whose
+    activity is no longer in the current blocked set goes back to active,
+    with whatever target_sets/target_amount it already had — so progress
+    earned before the suspension comes back too, not reset to baseline.
+    """
     blocked = _blocked_activities(session, user_id)
-    session.execute(delete(UserProgram).where(UserProgram.user_id == user_id))
+    existing = {
+        row.activity_type: row
+        for row in session.scalars(
+            select(UserProgram).where(UserProgram.user_id == user_id)
+        ).all()
+    }
 
     for row in session.scalars(select(ActivityTaxonomy)).all():
-        if row.activity_type in blocked:
+        entry = existing.get(row.activity_type)
+        is_blocked = row.activity_type in blocked
+
+        if entry is None:
+            if not is_blocked:
+                session.add(UserProgram(
+                    user_id=user_id,
+                    activity_type=row.activity_type,
+                    target_sets=row.default_sets,
+                    target_amount=row.default_amount,
+                    unit=row.amount_unit,
+                    source="template",
+                ))
             continue
-        session.add(UserProgram(
-            user_id=user_id,
-            activity_type=row.activity_type,
-            target_sets=row.default_sets,
-            target_amount=row.default_amount,
-            unit=row.amount_unit,
-            source="template",
-        ))
+
+        if is_blocked and entry.status == "active" and entry.source != "user_override":
+            entry.status = "suspended"
+            entry.suspended_reason = "condition_safety"
+        elif (
+            not is_blocked
+            and entry.status == "suspended"
+            and entry.suspended_reason == "condition_safety"
+        ):
+            entry.status = "active"
+            entry.suspended_reason = None
+
     session.flush()
     return get_program(session, user_id)
 
@@ -394,6 +499,108 @@ def remove_program_entry(session: Session, user_id: str, activity_type: str) -> 
     return {"removed": True, "program": get_program(session, user_id)}
 
 
+def set_program_to_activities(session: Session, user_id: str, activity_types: list[str]) -> dict:
+    """Drives the chat's "add these suggested exercises to your program?"
+    confirmation (found live: a user asked the rehab chatbot for
+    sport-specific exercises and wanted a one-tap way to actually put them in
+    their program). Ensures exactly this set of activities ends up active —
+    adds whichever aren't already there (or restores one that was previously
+    hidden), and soft-suspends (never deletes) any currently-active entry NOT
+    in this set, so switching focus to a new sport can't destroy progress on
+    an exercise the user might want back later — same soft-suspend convention
+    build_program already uses for condition-based safety changes, just a
+    different reason so the two are never confused with each other (a
+    condition being removed later must not silently resurrect something the
+    user deliberately swapped out for a sport focus, and vice versa).
+
+    Every activity_type passed in is trusted to already be safety-approved for
+    this user — the caller (the chat's suggestion-confirmation flow) only
+    ever offers activity_types that came from _approved_activities in the
+    first place, so this function doesn't re-check the safety grid itself.
+    A `user_override` entry (the user explicitly confirmed a KNOWN risk via
+    add_program_entry) is left untouched even if this set doesn't include it —
+    that's the same deliberate-choice protection build_program already gives
+    it, not something a sport-focus change should silently reverse either.
+    """
+    if is_referred(session, user_id):
+        raise Forbidden("Speak to a doctor before changing your program.")
+
+    wanted = set(activity_types)
+    existing = {
+        row.activity_type: row
+        for row in session.scalars(
+            select(UserProgram).where(UserProgram.user_id == user_id)
+        ).all()
+    }
+    taxonomy_by_type = {
+        t.activity_type: t
+        for t in session.scalars(
+            select(ActivityTaxonomy).where(ActivityTaxonomy.activity_type.in_(wanted))
+        ).all()
+    }
+
+    added, already_active, hidden = [], [], []
+    for activity_type in wanted:
+        entry = existing.get(activity_type)
+        if entry is None:
+            taxonomy = taxonomy_by_type.get(activity_type)
+            if taxonomy is None:
+                continue  # not a real activity_type — ignore rather than error
+            session.add(UserProgram(
+                user_id=user_id, activity_type=activity_type,
+                target_sets=taxonomy.default_sets, target_amount=taxonomy.default_amount,
+                unit=taxonomy.amount_unit, source="template",
+            ))
+            added.append(activity_type)
+        elif entry.status == "active":
+            already_active.append(activity_type)
+        else:
+            # Was hidden (any prior reason) — the user just explicitly asked
+            # for it back, so restore it with whatever it already had rather
+            # than resetting to a fresh baseline.
+            entry.status = "active"
+            entry.suspended_reason = None
+            already_active.append(activity_type)
+
+    for activity_type, entry in existing.items():
+        if (
+            activity_type not in wanted
+            and entry.status == "active"
+            and entry.source != "user_override"
+        ):
+            entry.status = "suspended"
+            entry.suspended_reason = "sport_focus_change"
+            hidden.append(activity_type)
+
+    session.flush()
+    return {
+        "added": added, "already_active": already_active, "hidden": hidden,
+        "program": get_program(session, user_id),
+    }
+
+
+def restore_program_activities(session: Session, user_id: str, activity_types: list[str]) -> dict:
+    """Restores specific hidden program entries back to active, with
+    whatever target they already had — the same "restore rather than reset"
+    principle add_program_entry already uses. Purely additive: unlike
+    set_program_to_activities, this never hides anything else. Drives the
+    chat's "bring these back?" revert confirmation (found live: a user
+    wanted a way to undo a previous sport-focus program change by asking the
+    chatbot directly, not by manually re-adding each exercise one by one on
+    the dashboard)."""
+    if is_referred(session, user_id):
+        raise Forbidden("Speak to a doctor before changing your program.")
+    restored = []
+    for activity_type in activity_types:
+        entry = session.get(UserProgram, (user_id, activity_type))
+        if entry is not None and entry.status != "active":
+            entry.status = "active"
+            entry.suspended_reason = None
+            restored.append(activity_type)
+    session.flush()
+    return {"restored": restored, "program": get_program(session, user_id)}
+
+
 def _tier_slice(items_by_priority: list[dict], band: str) -> tuple[set[str], set[str]]:
     """Split activities into (default, optional) for a dashboard experience tier.
 
@@ -426,6 +633,25 @@ def log_activity(session: Session, user_id: str, *, activity_type: str | None = 
                  client_entry_id: str | None = None) -> dict:
     if bool(activity_type) == bool(custom_exercise_id):
         raise ValidationError("Provide exactly one of activity_type or custom_exercise_id.")
+    # Found live (second-pass code audit): Python's json module accepts bare
+    # NaN/Infinity literals by default (json.loads('{"amount": NaN}') ->
+    # {'amount': nan}). NaN comparisons are always False, so `amount >
+    # MAX_LOGGABLE_AMOUNT` and `amount <= 0` below both silently pass for
+    # NaN — execution reached the implausible-flag Decimal comparison
+    # further down and raised an uncaught decimal.InvalidOperation instead
+    # of a clean 422. math.isfinite() explicitly rejects NaN and +/-Infinity
+    # up front, before either bound check.
+    if not math.isfinite(amount):
+        raise ValidationError("Amount must be a real, finite number.")
+    if amount > MAX_LOGGABLE_AMOUNT:
+        raise ValidationError(f"Amount cannot exceed {MAX_LOGGABLE_AMOUNT}.")
+    if sets > MAX_LOGGABLE_SETS:
+        raise ValidationError(f"Sets cannot exceed {MAX_LOGGABLE_SETS}.")
+    if client_entry_id is not None and len(client_entry_id) > 64:
+        # Found live (code audit): client_entry_id is String(64) — an
+        # overlong value used to hit the database as an uncaught
+        # "value too long" error instead of a clean 422.
+        raise ValidationError("client_entry_id cannot exceed 64 characters.")
 
     if custom_exercise_id:
         # 4.4 — same entry point, same validation shape as a taxonomy log;
@@ -454,6 +680,8 @@ def log_activity(session: Session, user_id: str, *, activity_type: str | None = 
         if measurement_type in ("distance", "duration") and sets != 1:
             raise ValidationError(f"{custom.name} is a single effort, not sets.")
         total = amount * sets
+        if total > MAX_TOTAL_VOLUME:
+            raise ValidationError(f"Total volume (amount x sets) cannot exceed {MAX_TOTAL_VOLUME}.")
         implausible = Decimal(str(total)) > Decimal(str(CUSTOM_MEASUREMENT_DEFAULT_MAX[measurement_type]))
         prescription = f"{sets} x {amount} {unit}" if sets > 1 else f"{amount} {unit}"
         row_activity_type = None
@@ -477,6 +705,8 @@ def log_activity(session: Session, user_id: str, *, activity_type: str | None = 
             raise ValidationError(f"{row.display_name} is a single effort, not sets.")
 
         total = row.total_volume(sets, amount)
+        if total > MAX_TOTAL_VOLUME:
+            raise ValidationError(f"Total volume (amount x sets) cannot exceed {MAX_TOTAL_VOLUME}.")
         # 4.6 — kept and flagged, never rejected. A user's entry is theirs.
         implausible = Decimal(str(total)) > row.plausible_max_total
         prescription = row.describe(sets, amount)
@@ -677,11 +907,18 @@ def recent_logs(session: Session, user_id: str, limit: int = 10) -> list[dict]:
 def streak(session: Session, user_id: str) -> dict:
     """4.2 — computed from the logs, never cached as the authority."""
     days = session.scalars(
-        select(ActivityLog.local_date).where(ActivityLog.user_id == user_id)
+        select(ActivityLog.local_date).where(
+            ActivityLog.user_id == user_id,
+            # Found live (code audit): every other date-aggregation function
+            # in this file (trend, activity_log_detail) already excludes
+            # flagged-implausible logs; this one didn't, letting a single
+            # garbage entry extend or preserve a streak it shouldn't.
+            ActivityLog.implausible.is_(False),
+        )
         .group_by(ActivityLog.local_date).order_by(ActivityLog.local_date.desc())
     ).all()
     if not days:
-        return {"current": 0, "last_active": None, "active_days": 0}
+        return {"current": 0, "last_active": None, "active_days": 0, "longest": 0}
 
     today = today_ist()
     # A streak survives "not yet today" — it breaks only after a full day missed.
@@ -693,8 +930,18 @@ def streak(session: Session, user_id: str) -> dict:
             cursor -= timedelta(days=1)
         elif d < cursor:
             break
+
+    # Longest run of consecutive active days ever, not just the one ending
+    # today/yesterday — reuses the same `days` list, no extra query.
+    longest = run = 0
+    prev = None
+    for d in sorted(days):
+        run = run + 1 if prev is not None and d == prev + timedelta(days=1) else 1
+        longest = max(longest, run)
+        prev = d
+
     return {"current": current, "last_active": days[0].isoformat(),
-            "active_days": len(days)}
+            "active_days": len(days), "longest": longest}
 
 
 MAX_TREND_DAYS = 365
@@ -744,6 +991,72 @@ def trend(session: Session, user_id: str, *, days: int | None = None,
 def weekly_volume(session: Session, user_id: str) -> list[dict]:
     """Seven days of logged volume for the dashboard chart (unchanged, 4.3)."""
     return trend(session, user_id, days=7)
+
+
+def signup_date(session: Session, user_id: str) -> date:
+    """Account creation date — the activity heatmap's real lower bound, so a
+    multi-month view doesn't render pre-signup days as if the account (and
+    thus zero activity) already existed back then."""
+    created_at = session.scalar(select(User.created_at).where(User.id == user_id))
+    return created_at.date() if created_at else today_ist()
+
+
+def activity_log_detail(session: Session, user_id: str, *,
+                         start_date: date, end_date: date) -> list[dict]:
+    """The itemized entries `trend()` deliberately doesn't give — which
+    exercise, how much, on which day — not just a per-day count. Built for
+    "what did I do yesterday" style questions (found live: RLM's analyze_
+    performance only ever computes rolled-up trend numbers — adherence %,
+    streak, plateau — and has no notion of a specific day's literal log, so
+    that question got an honest "I don't have the exact details" instead of
+    a real answer). Joins whichever of taxonomy/custom-exercise this row
+    actually points at (schema-enforced: exactly one is ever set, 4.1).
+
+    Found live (code audit): unlike trend(), which bounds its range at
+    MAX_TREND_DAYS before doing any date math, this had NO upper bound at
+    all — an explicit ?start=0001-01-01&end=9999-12-31 was accepted and ran
+    an unbounded, unpaginated query. Same cap as trend() for the range, plus
+    a hard row limit as a second line of defense for a long-tenured,
+    frequently-logging user even within a valid range.
+    """
+    if start_date > end_date:
+        raise ValidationError("start_date must be on or before end_date.")
+    if (end_date - start_date).days + 1 > MAX_TREND_DAYS:
+        raise ValidationError(f"Date range cannot exceed {MAX_TREND_DAYS} days.")
+    rows = session.execute(
+        select(ActivityLog, ActivityTaxonomy.display_name, CustomExercise.name)
+        .outerjoin(ActivityTaxonomy, ActivityTaxonomy.activity_type == ActivityLog.activity_type)
+        .outerjoin(CustomExercise, CustomExercise.id == ActivityLog.custom_exercise_id)
+        .where(ActivityLog.user_id == user_id,
+               ActivityLog.local_date >= start_date, ActivityLog.local_date <= end_date,
+               ActivityLog.implausible.is_(False))
+        .order_by(ActivityLog.local_date.desc(), ActivityLog.logged_at.desc())
+        .limit(2000)
+    ).all()
+    return [
+        {
+            "date": log.local_date.isoformat(),
+            "name": taxonomy_name or custom_name or log.activity_type,
+            "sets": log.sets_done,
+            "amount": float(log.amount_per_set),
+            "unit": log.unit,
+            "total_volume": float(log.total_volume),
+        }
+        for log, taxonomy_name, custom_name in rows
+    ]
+
+
+def activity_log_date_bounds(session: Session, user_id: str) -> tuple[date | None, date | None]:
+    """(earliest, latest) logged date, or (None, None) if nothing's logged yet.
+    Built for date references that aren't pure calendar math from today ("my
+    first day", "when did I start") — those need the real earliest date, not
+    a guess, the same way a weekday name ("Thursday") needs the real day of
+    the week today falls on rather than the model inventing one."""
+    row = session.execute(
+        select(func.min(ActivityLog.local_date), func.max(ActivityLog.local_date))
+        .where(ActivityLog.user_id == user_id, ActivityLog.implausible.is_(False))
+    ).one()
+    return row[0], row[1]
 
 
 # --- Suggestions + videos --------------------------------------------------

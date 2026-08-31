@@ -50,6 +50,15 @@ tailwind.config = { theme: { extend: {
          font-weight:700;box-shadow:0 8px 24px rgba(0,0,0,.14);opacity:0;pointer-events:none;
          transition:opacity .2s ease}
   .toast.show{opacity:1}
+  /* Chat message bubbles scrollIntoView({block:"end"}) to their own bottom
+     edge, which ignores #c-thread's trailing padding-bottom entirely — that
+     padding only affects how far you CAN scroll, not where scrollIntoView
+     stops. Without this, the newest message lands flush with the actual
+     viewport bottom, landing directly behind the fixed composer+nav bar
+     that visually overlay that same area. scroll-margin-bottom IS honored
+     by scrollIntoView, so it reserves the right amount of clearance instead.
+     ~70px composer offset + composer's own height + the nav pill below it. */
+  #c-thread > div{scroll-margin-bottom:210px}
 </style>
 </head>
 <body class="min-h-screen pb-32">
@@ -145,35 +154,74 @@ tailwind.config = { theme: { extend: {
       </div>
     </section>
 
-    <!-- chart - donut removed, bar chart expanded to use the freed space -->
+    <!-- stats — 4 stat cards + a 12-month activity heatmap, replacing the
+         old 7/15/30-day bar chart with the same shape of data (daily
+         logged-activity counts from /v1/dashboard/trend) read over a longer
+         window instead. No body-weight tracking exists in this app yet, so
+         there's no "Weight 30d" card here — only metrics the backend has. -->
     <section class="space-y-md">
-      <div class="flex justify-between items-center">
-        <div class="flex items-center gap-xs">
-          <span class="font-label-sm text-label-sm text-on-surface-variant">Sort By:</span>
-          <select id="h-trend-period" onchange="onTrendPeriodChange(this.value)"
-            class="bg-transparent font-label-bold text-label-bold text-on-surface border-none focus:outline-none cursor-pointer">
-            <option value="7" selected>7 Days</option>
-            <option value="15">15 Days</option>
-            <option value="30">30 Days</option>
-          </select>
+      <h3 class="font-headline-sm text-headline-sm text-on-surface">Stats</h3>
+      <div class="grid grid-cols-2 gap-sm">
+        <div class="bg-surface-container-lowest ambient-shadow rounded-lg p-md space-y-xs">
+          <div class="flex items-center gap-xs text-on-surface-variant">
+            <span class="material-symbols-outlined text-[18px]">fitness_center</span>
+            <span class="font-label-sm text-label-sm">Workouts</span>
+          </div>
+          <div id="h-stat-workouts" class="font-headline-sm text-headline-sm text-on-surface">0</div>
         </div>
-        <div class="bg-primary-container text-on-primary-container px-md py-xs rounded-full flex items-center gap-xs">
-          <span class="material-symbols-outlined text-label-bold">local_fire_department</span>
-          <span id="h-streak" class="font-label-bold text-label-bold">0 Day Streak</span>
+        <div class="bg-surface-container-lowest ambient-shadow rounded-lg p-md space-y-xs">
+          <div class="flex items-center gap-xs text-on-surface-variant">
+            <span class="material-symbols-outlined text-[18px]">calendar_month</span>
+            <span class="font-label-sm text-label-sm">This month</span>
+          </div>
+          <div id="h-stat-month" class="font-headline-sm text-headline-sm text-on-surface">0</div>
+        </div>
+        <div class="bg-surface-container-lowest ambient-shadow rounded-lg p-md space-y-xs">
+          <div class="flex items-center gap-xs text-on-surface-variant">
+            <span class="material-symbols-outlined text-[18px]">local_fire_department</span>
+            <span class="font-label-sm text-label-sm">Day streak</span>
+          </div>
+          <div id="h-stat-streak" class="font-headline-sm text-headline-sm text-on-surface">0</div>
+        </div>
+        <div class="bg-surface-container-lowest ambient-shadow rounded-lg p-md space-y-xs">
+          <div class="flex items-center gap-xs text-on-surface-variant">
+            <span class="material-symbols-outlined text-[18px]">emoji_events</span>
+            <span class="font-label-sm text-label-sm">Best streak</span>
+          </div>
+          <div id="h-stat-best" class="font-headline-sm text-headline-sm text-on-surface">0</div>
         </div>
       </div>
-      <div class="bg-surface-container-lowest ambient-shadow rounded-lg p-lg">
-        <div class="flex h-64">
-          <div id="h-yaxis" class="flex flex-col justify-between text-xs text-secondary/60 pb-6 pr-4 font-medium"></div>
-          <div class="flex-1 relative flex flex-col">
-            <div class="absolute inset-0 flex flex-col justify-between pb-6 pointer-events-none z-0">
-              <div class="w-full h-px bg-surface-variant/50"></div>
-              <div class="w-full h-px bg-surface-variant/50"></div>
-              <div class="w-full h-px bg-surface-variant/50"></div>
-            </div>
-            <div id="h-bars" class="flex-1 flex items-end justify-between z-10 pb-6 gap-4"></div>
-            <div id="h-days" class="absolute bottom-0 left-0 right-0 flex justify-between text-xs text-secondary/60 font-medium pt-2"></div>
+
+      <div class="bg-surface-container-lowest ambient-shadow rounded-lg p-lg space-y-sm">
+        <div>
+          <span class="font-label-bold text-label-bold text-on-surface">Activity</span>
+          <span id="h-heatmap-period-label" class="font-label-sm text-label-sm text-on-surface-variant"></span>
+        </div>
+        <div id="h-heatmap-period-tabs" class="flex gap-xs"></div>
+        <div class="flex gap-[3px]">
+          <div class="flex flex-col pr-2 text-[10px] text-on-surface-variant shrink-0">
+            <!-- Invisible spacer matching h-heatmap-months' own height/margin
+                 exactly (same classes) — without it "Mon" sits next to the
+                 month row instead of the grid's first row below it. -->
+            <div class="mb-1 font-label-sm text-[10px] invisible">&nbsp;</div>
+            <div id="h-heatmap-weekday-rows" class="flex flex-col justify-between"><span>Mon</span><span>Wed</span><span>Fri</span></div>
           </div>
+          <!-- months + grid share one scroll container so they always scroll
+               in sync and use identical column widths — two separate rows
+               each sizing independently is what desynced them before. -->
+          <div id="h-heatmap-scroll" class="flex-1 overflow-x-auto">
+            <div id="h-heatmap-months" class="flex gap-[3px] mb-1 font-label-sm text-[10px] text-on-surface-variant"></div>
+            <div id="h-heatmap-grid" class="flex gap-[3px]"></div>
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-1 text-[10px] text-on-surface-variant">
+          <span>Less</span>
+          <span class="w-[10px] h-[10px] rounded-[2px] bg-surface-variant/30"></span>
+          <span class="w-[10px] h-[10px] rounded-[2px] bg-[#419E4B]/35"></span>
+          <span class="w-[10px] h-[10px] rounded-[2px] bg-[#419E4B]/70"></span>
+          <span class="w-[10px] h-[10px] rounded-[2px] bg-[#2E8B3B]"></span>
+          <span class="w-[10px] h-[10px] rounded-[2px] bg-[#1E6B24]"></span>
+          <span>More</span>
         </div>
       </div>
     </section>
@@ -237,7 +285,7 @@ tailwind.config = { theme: { extend: {
     </div>
   </div>
 
-  <div id="c-composer" class="fixed bottom-[120px] left-0 right-0 z-40 bg-surface-container-lowest border-t border-outline-variant/20">
+  <div id="c-composer" class="fixed bottom-[70px] left-0 right-0 z-40 bg-transparent border-t border-outline-variant/20">
     <div class="max-w-md mx-auto px-container-margin py-sm flex items-end gap-sm">
       <textarea id="c-input" rows="1" placeholder="Describe what you're feeling…"
         onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); sendChat();}"
@@ -473,13 +521,54 @@ function toast(msg, bad) {
   setTimeout(() => t.className = "toast", 2600);
 }
 
-async function api(method, path, body) {
+let refreshInFlight = null;
+
+async function doRefreshToken() {
+  const r = await fetch("/v1/auth/refresh", {
+    method: "POST",
+    headers: {"Content-Type": "application/json", "X-Device-Id": DEV},
+    body: JSON.stringify({refresh_token: RT}),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(d.error?.message || r.statusText), {status: r.status});
+  // Refresh tokens rotate — the response carries a NEW refresh_token too, and
+  // the old one is now invalid. Storing only the new access_token would make
+  // the *next* refresh attempt fail with a stale, already-rotated-out token.
+  AT = d.access_token; RT = d.refresh_token;
+  localStorage.setItem("at", AT); localStorage.setItem("rt", RT);
+}
+
+async function api(method, path, body, _retried) {
   const h = {"X-Device-Id": DEV};
   if (body) h["Content-Type"] = "application/json";
   if (AT) h["Authorization"] = "Bearer " + AT;
   const r = await fetch(path, {method, headers: h, body: body ? JSON.stringify(body) : undefined});
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(d.error?.message || r.statusText), {status: r.status});
+  if (!r.ok) {
+    // Silent renewal (11.1) — the backend's own /v1/auth/refresh docstring
+    // says "an active user never sees a login screen again after signup,"
+    // but nothing on this side was ever actually calling it: an expired
+    // access token just surfaced as a raw "Access token expired" toast,
+    // mid-chat, with the user's message already gone from the input box.
+    // One refresh-and-retry attempt per call, deduped via refreshInFlight so
+    // several requests failing at once (e.g. a screen firing parallel
+    // fetches) don't each rotate the refresh token out from under the others.
+    if (r.status === 401 && RT && !_retried) {
+      try {
+        if (!refreshInFlight) refreshInFlight = doRefreshToken().finally(() => { refreshInFlight = null; });
+        await refreshInFlight;
+        return api(method, path, body, true);
+      } catch (_) {
+        localStorage.clear(); AT = null; RT = null;
+        go("auth");
+        // Not toasted here — every existing caller already does
+        // `catch (e) { toast(e.message, true) }` on failure; toasting inside
+        // api() too would just show the same message to the user twice.
+        throw Object.assign(new Error("Your session ended — please sign in again."), {status: 401});
+      }
+    }
+    throw Object.assign(new Error(d.error?.message || r.statusText), {status: r.status});
+  }
   return d;
 }
 
@@ -594,51 +683,137 @@ async function submitOnboarding() {
   }
 }
 
-// ── trend chart (4.3 — 7d/15d/30d) ──
-function renderTrend(days) {
-  const max = Math.max(1, ...days.map(w => w.count));
-  const top = Math.max(2, Math.ceil(max / 2) * 2);
-  $("h-yaxis").innerHTML = [top, Math.round(top/2), 0].map(v => `<span>${v}</span>`).join("");
-  $("h-bars").innerHTML = days.map(w =>
-    `<div class="w-full bg-[#419E4B] rounded-t-lg" style="height:${w.count?Math.max(6,(w.count/top)*100):2}%;opacity:${w.count?1:.25}"></div>`).join("");
-  $("h-days").innerHTML = days.map(w => `<div class="w-full text-center">${w.label}</div>`).join("");
+// ── stats: 4 stat cards + 12-month activity heatmap (replaces the old
+// 7/15/30-day bar chart) ──
+function renderStatCards(streak, yearDaily) {
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  const monthStartStr = monthStart.toISOString().slice(0, 10);
+  const thisMonth = yearDaily.filter(d => d.date >= monthStartStr && d.count > 0).length;
+  $("h-stat-workouts").textContent = streak.active_days;
+  $("h-stat-month").textContent = thisMonth;
+  $("h-stat-streak").textContent = streak.current;
+  $("h-stat-best").textContent = streak.longest;
 }
 
-// Beyond 15 days, one bar per day gets too cramped for the box (fixed gaps
-// between bars add up to more width than the box has). Group into weekly
-// totals instead - fewer, wider bars, and a more useful number anyway once
-// you're looking at a month or more.
-const TREND_DAILY_LIMIT = 15;
+// One fetch (365 days) covers every period tab below — filtering client-side
+// avoids a re-fetch each time the user switches tabs.
+let activityYearData = [];
+let activitySignupDate = null; // "YYYY-MM-DD", from /v1/dashboard/summary
+let activityPeriodMonths = 3; // default tab — 1M made cells so big (to fill
+// the width with only ~5 columns) that it blew up the card's height instead
 
-function toWeeklyBuckets(daily) {
-  const weeks = [];
-  for (let i = 0; i < daily.length; i += 7) {
-    const chunk = daily.slice(i, i + 7);
-    const total = chunk.reduce((sum, d) => sum + d.count, 0);
-    weeks.push({
-      date: chunk[0].date,
-      label: new Date(chunk[0].date).toLocaleDateString([], {month: "short", day: "numeric"}),
-      count: total,
-    });
+const ACTIVITY_PERIODS = [[3, "3M"], [6, "6M"], [12, "12M"]];
+const ACTIVITY_PERIOD_DAYS = {3: 91, 6: 182, 12: 365};
+
+// A fixed-length window (not just "from N months ago to today"): if the
+// account is younger than the period, the window starts at signup instead
+// of before it (no pre-signup days rendered as if they were just inactive),
+// and — since the window still keeps its full length — it then runs past
+// today into the future rather than stopping short, so the grid always
+// covers the full period end to end.
+function activityWindowBounds(months) {
+  const periodDays = ACTIVITY_PERIOD_DAYS[months];
+  const today = new Date();
+  const naturalStart = new Date(today);
+  naturalStart.setDate(naturalStart.getDate() - periodDays + 1);
+  let start = naturalStart;
+  if (activitySignupDate) {
+    const signup = new Date(activitySignupDate);
+    if (signup > start) start = signup;
   }
-  return weeks;
+  const end = new Date(start);
+  end.setDate(end.getDate() + periodDays - 1);
+  return {start, end, clampedToSignup: start > naturalStart};
 }
 
-function prepareTrendData(daily) {
-  return daily.length > TREND_DAILY_LIMIT ? toWeeklyBuckets(daily) : daily;
+function activityPeriodSlice(months) {
+  const {start, end} = activityWindowBounds(months);
+  const counts = new Map(activityYearData.map(d => [d.date, d.count]));
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const days = [];
+  for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const dateStr = d.toISOString().slice(0, 10);
+    // Future days have no log yet — same "empty" look as a past day with
+    // no activity, rather than being left off the grid entirely.
+    days.push({date: dateStr, count: dateStr > todayStr ? 0 : (counts.get(dateStr) || 0)});
+  }
+  return days;
 }
 
-// Tracks the dropdown's current selection so loadHome() (called after every
-// log/add/remove/rename — not just on page load) can keep showing whatever
-// period the user picked, instead of always reverting to 7 days.
-let currentTrendDays = 7;
+function renderActivityPeriodTabs() {
+  $("h-heatmap-period-tabs").innerHTML = ACTIVITY_PERIODS.map(([months, label]) => `
+    <button onclick="selectActivityPeriod(${months})"
+      class="px-md py-xs rounded-full font-label-sm text-label-sm border transition-colors ${
+        months === activityPeriodMonths
+          ? "bg-primary-fixed/20 border-primary-fixed text-on-primary-fixed-variant"
+          : "bg-surface-container border-outline-variant text-on-surface-variant hover:bg-surface-variant"
+      }">${label}</button>`).join("");
+  const [, activeLabel] = ACTIVITY_PERIODS.find(([m]) => m === activityPeriodMonths);
+  const {clampedToSignup} = activityWindowBounds(activityPeriodMonths);
+  const span = clampedToSignup ? "since you joined" : `last ${activeLabel.replace("M", "")} months`;
+  $("h-heatmap-period-label").textContent = ` — ${span} · by time trained`;
+}
 
-async function onTrendPeriodChange(value) {
-  currentTrendDays = Number(value);
-  try {
-    const d = await api("GET", `/v1/dashboard/trend?days=${value}`);
-    renderTrend(prepareTrendData(d.trend));
-  } catch (e) { toast(e.message, true); }
+function selectActivityPeriod(months) {
+  activityPeriodMonths = months;
+  renderActivityPeriodTabs();
+  renderActivityHeatmap(activityPeriodSlice(months));
+}
+
+// GitHub-contribution-style grid: one column per week (Mon-first), one row
+// per weekday. daily is already in ascending date order (oldest first),
+// one entry per day, sliced from the 365-day /v1/dashboard/trend fetch.
+const HEATMAP_GAP = 3;
+const HEATMAP_MIN_CELL = 10;
+// Deliberately generous, not a "nice" cap — the point is to fill the card
+// edge to edge for short periods (1M: ~5 columns, 3M: ~13), not to leave a
+// gap on the right because the cells hit some arbitrary size limit first.
+const HEATMAP_MAX_CELL = 72;
+
+function renderActivityHeatmap(daily) {
+  if (!daily.length) { $("h-heatmap-grid").innerHTML = ""; $("h-heatmap-months").innerHTML = ""; return; }
+  const firstDow = (new Date(daily[0].date).getDay() + 6) % 7; // Sun=0..Sat=6 -> Mon=0..Sun=6
+  const cells = Array(firstDow).fill(null).concat(daily);
+  while (cells.length % 7 !== 0) cells.push(null);
+  const weeks = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+
+  // Fill the available width instead of always drawing fixed 10px cells —
+  // a 1-month view (~5 columns) would otherwise leave most of the card
+  // blank. A 12-month view (~53 columns) still hits the 10px floor and
+  // scrolls horizontally (h-heatmap-scroll), same as before.
+  const availableWidth = $("h-heatmap-scroll").clientWidth || 260;
+  const rawCell = (availableWidth - (weeks.length - 1) * HEATMAP_GAP) / weeks.length;
+  const cell = Math.max(HEATMAP_MIN_CELL, Math.min(HEATMAP_MAX_CELL, Math.floor(rawCell)));
+  const colHeight = 7 * cell + 6 * HEATMAP_GAP;
+  $("h-heatmap-weekday-rows").style.height = colHeight + "px";
+
+  const max = Math.max(1, ...daily.map(d => d.count));
+  function levelClass(count) {
+    if (count == null) return "opacity-0";
+    if (count === 0) return "bg-surface-variant/30";
+    const ratio = count / max;
+    if (ratio > 0.75) return "bg-[#1E6B24]";
+    if (ratio > 0.5) return "bg-[#2E8B3B]";
+    if (ratio > 0.25) return "bg-[#419E4B]/70";
+    return "bg-[#419E4B]/35";
+  }
+
+  $("h-heatmap-grid").innerHTML = weeks.map(week => `
+    <div class="flex flex-col gap-[3px] shrink-0" style="width:${cell}px">
+      ${week.map(day => `<div class="rounded-[2px] ${levelClass(day ? day.count : null)}" style="width:${cell}px;height:${cell}px"${day ? ` title="${day.date}: ${day.count} logged"` : ""}></div>`).join("")}
+    </div>`).join("");
+
+  let lastMonth = null;
+  $("h-heatmap-months").innerHTML = weeks.map(week => {
+    const firstReal = week.find(d => d);
+    if (!firstReal) return `<div class="shrink-0" style="width:${cell}px"></div>`;
+    const m = new Date(firstReal.date).toLocaleDateString([], {month: "short"});
+    const label = m !== lastMonth ? m : "";
+    lastMonth = m;
+    return `<div class="shrink-0" style="width:${cell}px">${label}</div>`;
+  }).join("");
 }
 
 // ── custom exercises (4.4) — personal, tracking-only, never suggested ──
@@ -754,17 +929,17 @@ async function loadHome() {
   $("h-avatar").textContent = (EMAIL[0] || "?").toUpperCase();
   $("h-hello").textContent = "Welcome back, " + EMAIL.split("@")[0] + "!";
 
-  // Fired together, not one-after-the-other: when a longer period is
-  // selected, /v1/dashboard/summary's own 7-day `week` field goes unused —
-  // no reason to also pay for it sequentially before starting the trend
-  // fetch that actually gets rendered.
-  const trendNeeded = currentTrendDays !== 7;
-  const [d, trendData] = await Promise.all([
+  // Fired together, not sequentially: the summary's streak/suggestions and
+  // the 365-day trend (for the stat cards + heatmap) don't depend on each other.
+  const [d, yearTrend] = await Promise.all([
     api("GET", "/v1/dashboard/summary"),
-    trendNeeded ? api("GET", `/v1/dashboard/trend?days=${currentTrendDays}`) : Promise.resolve(null),
+    api("GET", "/v1/dashboard/trend?days=365"),
   ]);
-  $("h-streak").textContent = d.streak.current + " Day Streak";
-  renderTrend(prepareTrendData(trendNeeded ? trendData.trend : d.week));
+  renderStatCards(d.streak, yearTrend.trend);
+  activityYearData = yearTrend.trend;
+  activitySignupDate = d.signup_date;
+  renderActivityPeriodTabs();
+  renderActivityHeatmap(activityPeriodSlice(activityPeriodMonths));
 
   const items = d.suggestions.all_items || [];
   HOME_ITEMS = items;
@@ -1307,8 +1482,22 @@ async function loadChat() {
     $("c-composer").className = "hidden";
   } else {
     $("c-referred").className = "hidden";
-    $("c-composer").className = "fixed bottom-[120px] left-0 right-0 z-40 bg-surface-container-lowest border-t border-outline-variant/20";
+    $("c-composer").className = "fixed bottom-[70px] left-0 right-0 z-40 bg-transparent border-t border-outline-variant/20";
   }
+
+  // One continuous conversation per account, not per login: load it once per
+  // page load, not on every re-visit to this tab (which would just duplicate
+  // every bubble already on screen from the first load or from this session).
+  if (!CHAT_INITED) {
+    try {
+      const h = await api("GET", "/v1/rehab/history");
+      for (const turn of h.history) {
+        appendChatBubble(turn.question, true);
+        appendChatBubble(turn.answer, false);
+      }
+    } catch (e) { toast(e.message, true); }
+  }
+
   CHAT_INITED = true;
 }
 
@@ -1345,6 +1534,59 @@ function formatBotBlock(block) {
     bulletLines.map(l => `<li>${l.replace(/^[-*]\s+/, "")}</li>`).join("")}</ul>`;
   if (after.length) html += `<p class="mb-2">${after.join("<br>")}</p>`;
   return html;
+}
+
+// Honest status text, not fake progress theater — the backend genuinely does
+// retrieve reviewed sources, then prepare the safety-constrained prompt, then
+// generate through the LLM (the slow part — free-tier generation alone can
+// take 30-90s+), then finish up (the safety keyword check + saving memory).
+// Each message fires ONCE, in order, then holds — it must never cycle back to
+// "Looking up..." after reaching the end, which reads as broken/stuck on a
+// slow request. The answer itself is never streamed (see the safety
+// backstop's own comment: it has to see the WHOLE answer before deciding
+// whether to show it, so partial-reveal would let a leaked medication/surgery
+// name slip onto the screen before the check catches it).
+const THINKING_SCHEDULE = [
+  {text: "Looking up reviewed medical sources…", at: 0},
+  {text: "Checking your safety guidelines…", at: 2000},
+  {text: "Generating your answer…", at: 5000},
+  {text: "Finishing up…", at: 25000},
+];
+
+function showThinkingBubble() {
+  const wrap = document.createElement("div");
+  wrap.className = "self-start max-w-[90%]";
+  wrap.innerHTML = `
+    <div class="flex items-end gap-xs mb-1">
+      <div class="w-6 h-6 rounded-full bg-primary flex items-center justify-center">
+        <span class="material-symbols-outlined text-on-primary text-[14px]" style="font-variation-settings:'FILL' 1">smart_toy</span>
+      </div>
+      <span class="font-label-sm text-label-sm text-on-surface-variant">Coach AI</span>
+    </div>
+    <div class="bg-surface-container-lowest ambient-shadow rounded-2xl rounded-tl-sm p-md flex items-center gap-sm">
+      <span class="flex gap-1 shrink-0">
+        <span class="w-1.5 h-1.5 rounded-full bg-on-surface-variant animate-bounce" style="animation-delay:0ms"></span>
+        <span class="w-1.5 h-1.5 rounded-full bg-on-surface-variant animate-bounce" style="animation-delay:150ms"></span>
+        <span class="w-1.5 h-1.5 rounded-full bg-on-surface-variant animate-bounce" style="animation-delay:300ms"></span>
+      </span>
+      <span class="thinking-text font-body-md text-body-md text-on-surface-variant"></span>
+    </div>`;
+  $("c-thread").appendChild(wrap);
+  wrap.scrollIntoView({behavior: "smooth", block: "end"});
+
+  const textEl = wrap.querySelector(".thinking-text");
+  textEl.textContent = THINKING_SCHEDULE[0].text;
+  const timers = THINKING_SCHEDULE.slice(1).map(step =>
+    setTimeout(() => { textEl.textContent = step.text; }, step.at)
+  );
+
+  return {wrap, timers};
+}
+
+function removeThinkingBubble(handle) {
+  if (!handle) return;
+  handle.timers.forEach(clearTimeout);
+  handle.wrap.remove();
 }
 
 function appendChatBubble(text, fromUser) {
@@ -1386,13 +1628,16 @@ async function sendChat() {
 // user just tapped a condition-choice chip (5.6) — null code means "decline,
 // answer anyway without adding a condition."
 async function runQuery(question, confirmation) {
+  const thinking = showThinkingBubble();
   try {
     const body = confirmation !== null
       ? {question, condition_confirmation: confirmation}
       : {question};
     const d = await api("POST", "/v1/rehab/query", body);
+    removeThinkingBubble(thinking);
     renderChatResponse(d);
   } catch (e) {
+    removeThinkingBubble(thinking);
     if (e.status === 429) {
       // Two distinct 429s: real quota exhaustion ("come back tomorrow") vs the
       // LLM provider being temporarily rate-limited ("try again in a moment,
@@ -1426,6 +1671,90 @@ function renderChatResponse(d) {
   }
 
   appendChatBubble(d.answer, false);
+
+  if (d.needs_program_update_confirmation && d.suggested_activities?.length) {
+    appendProgramSuggestionChip(d.suggested_activities);
+  }
+  if (d.needs_revert_confirmation && d.revert_candidates?.length) {
+    appendRevertChip(d.revert_candidates);
+  }
+}
+
+// Found live (user request): after the chatbot names specific approved
+// exercises, offer a one-tap way to actually add them to the program,
+// instead of the user having to go find and add each one manually on the
+// dashboard. Confirming replaces the program's active set with exactly
+// these activities — anything currently active that ISN'T in this list gets
+// hidden (never deleted, see service.py's set_program_to_activities), so
+// switching focus to a new sport can't destroy progress on something the
+// user might want back later.
+function appendProgramSuggestionChip(activities) {
+  const wrap = document.createElement("div");
+  wrap.className = "self-start max-w-[90%] mt-1";
+
+  const names = activities.map(a => a.display_name).join(", ");
+  const btn = document.createElement("button");
+  btn.textContent = `+ Add these to my program: ${names}`;
+  btn.className = "px-md py-sm rounded-2xl font-label-sm text-label-sm text-left border border-primary-fixed bg-primary-fixed/10 text-on-primary-fixed-variant active:scale-95 transition-transform disabled:opacity-40";
+
+  btn.onclick = async () => {
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = "Updating your program…";
+    try {
+      const activity_types = activities.map(a => a.activity_type);
+      const result = await api("POST", "/v1/rehab/query", {
+        program_confirmation: {activity_types, confirmed: true},
+      });
+      appendChatBubble(result.message, false);
+      wrap.remove();
+    } catch (e) {
+      toast(e.message, true);
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  };
+
+  wrap.appendChild(btn);
+  $("c-thread").appendChild(wrap);
+  wrap.scrollIntoView({behavior: "smooth", block: "end"});
+}
+
+// Found live (user request): "revert what I did previously" via the chat —
+// the chatbot looks up what a PAST sport-suggestion confirmation actually
+// hid (never a manual removal, see service.py's _hidden_by_sport_focus_change)
+// and offers a one-tap way to bring it back, same button pattern as
+// appendProgramSuggestionChip above.
+function appendRevertChip(candidates) {
+  const wrap = document.createElement("div");
+  wrap.className = "self-start max-w-[90%] mt-1";
+
+  const names = candidates.map(a => a.display_name).join(", ");
+  const btn = document.createElement("button");
+  btn.textContent = `↺ Bring these back: ${names}`;
+  btn.className = "px-md py-sm rounded-2xl font-label-sm text-label-sm text-left border border-primary-fixed bg-primary-fixed/10 text-on-primary-fixed-variant active:scale-95 transition-transform disabled:opacity-40";
+
+  btn.onclick = async () => {
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = "Restoring…";
+    try {
+      const activity_types = candidates.map(a => a.activity_type);
+      const result = await api("POST", "/v1/rehab/query", {
+        revert_confirmation: {activity_types, confirmed: true},
+      });
+      appendChatBubble(result.message, false);
+      wrap.remove();
+    } catch (e) {
+      toast(e.message, true);
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  };
+
+  wrap.appendChild(btn);
+  $("c-thread").appendChild(wrap);
+  wrap.scrollIntoView({behavior: "smooth", block: "end"});
 }
 
 // 5.6 — the model only ever suggests a condition match; recording it always
@@ -1503,7 +1832,12 @@ async function doLogout() {
 }
 async function delAccount() {
   if (!confirm("Delete your account?")) return;
-  try { await api("DELETE","/v1/account"); } catch {}
+  // DELETE /v1/account now requires re-confirming the password (found live,
+  // third-pass code audit — the most destructive action in the app used to
+  // need only a valid session, no re-authentication).
+  const password = window.prompt("Confirm your password to delete your account:");
+  if (!password) return;
+  try { await api("DELETE","/v1/account",{password}); } catch {}
   localStorage.clear(); AT=null; go("auth");
 }
 

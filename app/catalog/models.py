@@ -63,6 +63,13 @@ class ActivityTaxonomy(Base):
     # Outlier ceiling on TOTAL volume for one entry (sets x amount x sides).
     plausible_max_total: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
 
+    # Module 15 diminishing-curve tuning constant (RLM design doc §4.1). Optional
+    # per-activity override — null means "use the app-wide default" (see
+    # app.progression.service.DEFAULT_CURVE_K). Not populated from CSV yet: this
+    # reviewed table is physiotherapist-owned, and per-activity tuning is a later
+    # decision for them to make, not one engineering makes by editing the CSV.
+    curve_k: Mapped[float | None] = mapped_column(Numeric(6, 3))
+
     # Lets a distance activity show an honest time estimate without storing a
     # second target. Only meaningful for `distance`.
     est_pace_min_per_km: Mapped[float | None] = mapped_column(Numeric(6, 2))

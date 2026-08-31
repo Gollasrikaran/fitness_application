@@ -119,3 +119,15 @@ gout,calf_stretch,modify,Weight-bearing and foot/ankle movement should be reduce
 gout,ankle_circles,modify,Weight-bearing and foot/ankle movement should be reduced or paused during an acute flare. Fine between episodes.,product-team (not clinically reviewed),2026-08-14
 gout,wrist_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",product-team (not clinically reviewed),2026-08-14
 gout,running,modify,Weight-bearing and foot/ankle movement should be reduced or paused during an acute flare. Fine between episodes.,product-team (not clinically reviewed),2026-08-14
+none,walk,safe,"No condition selected — conditions.csv already documents this as ""Standard program. No exclusions applied.""; this row (and the 11 below) make that same no-exclusions intent explicit in the safety grid too, so a healthy user gets real exercise suggestions from the chatbot instead of an empty approved list.",product-team (not clinically reviewed),2026-08-28
+none,running,safe,"No condition selected — standard program, no exclusions.",product-team (not clinically reviewed),2026-08-28
+none,glute_bridge,safe,"No condition selected — standard program, no exclusions.",product-team (not clinically reviewed),2026-08-28
+none,dead_bug,safe,"No condition selected — standard program, no exclusions.",product-team (not clinically reviewed),2026-08-28
+none,ankle_circles,safe,"No condition selected — standard program, no exclusions.",product-team (not clinically reviewed),2026-08-28
+none,wrist_circles,safe,"No condition selected — standard program, no exclusions.",product-team (not clinically reviewed),2026-08-28
+none,shoulder_circles,safe,"No condition selected — standard program, no exclusions.",product-team (not clinically reviewed),2026-08-28
+none,neck_isometric,safe,"No condition selected — standard program, no exclusions.",product-team (not clinically reviewed),2026-08-28
+none,hamstring_stretch,safe,"No condition selected — standard program, no exclusions.",product-team (not clinically reviewed),2026-08-28
+none,quad_stretch,safe,"No condition selected — standard program, no exclusions.",product-team (not clinically reviewed),2026-08-28
+none,calf_stretch,safe,"No condition selected — standard program, no exclusions.",product-team (not clinically reviewed),2026-08-28
+none,lower_back_side_stretch,safe,"No condition selected — standard program, no exclusions.",product-team (not clinically reviewed),2026-08-28

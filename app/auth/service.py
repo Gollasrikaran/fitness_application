@@ -21,7 +21,9 @@ from app.auth.models import (
     DeletionRequest, DevicePushToken, EmailVerificationToken,
     PasswordResetToken, RefreshToken, User,
 )
-from app.auth.passwords import hash_password, validate_password, verify_password
+from app.auth.passwords import (
+    DUMMY_PASSWORD_HASH, hash_password, validate_password, verify_password,
+)
 from app.platform import redis_clients as rc
 from app.platform.config import Config
 from app.platform.errors import Conflict, RateLimited, Unauthorized, ValidationError
@@ -85,24 +87,50 @@ def login(session: Session, cfg: Config, email: str, password: str,
     email = _normalise_email(email)
     user = session.scalar(select(User).where(User.email == email))
 
+    # Always pay the Argon2 cost, even when no such user exists — see
+    # DUMMY_PASSWORD_HASH's docstring for why this closes a real timing
+    # side-channel (found live, code audit). Deliberately runs BEFORE the
+    # lockout check below: found live in a second-pass audit that when this
+    # ran after, a locked-out EXISTING account returned RateLimited
+    # immediately (skipping verify_password entirely) while a nonexistent
+    # account always paid the slow dummy-hash cost — an attacker who first
+    # drove >=login_lockout_threshold failed attempts against a target email
+    # could then distinguish "exists" from "doesn't exist" by timing alone,
+    # reopening the exact enumeration oracle this fix exists to close.
+    password_ok = verify_password(
+        user.password_hash if user is not None else DUMMY_PASSWORD_HASH, password
+    )
+
     # Per-account counter (1.2). Keyed on the account, because per-IP and
     # per-device limits are trivially bypassed by rotating both.
-    fail_key = rc.key_login_failures(user.id) if user else None
-    if fail_key:
-        failures = int(rc.durable().get(fail_key) or 0)
-        delay = _lockout_delay(cfg, failures)
-        if delay:
-            raise RateLimited(
-                "Too many failed attempts. Please wait before trying again.",
-                retry_after=delay,
-            )
+    #
+    # Found live (third-pass code audit): this used to be `None` for a
+    # nonexistent account, which skipped the lockout check/increment below
+    # entirely — only a REAL account could ever accumulate failures and
+    # eventually get a 429 "too many attempts." An attacker could tell
+    # "exists" from "doesn't exist" purely by which status code repeated
+    # attempts eventually returned, regardless of timing (the exact class of
+    # oracle the dummy-hash fix above already closed for timing specifically).
+    # Now every email gets a counter either way — a real account's by user_id
+    # (stable across an email change), a nonexistent one's by the email
+    # itself — so the lockout behavior is identical for both.
+    fail_key = (
+        rc.key_login_failures(user.id) if user
+        else rc.key_login_failures_by_email(email)
+    )
+    failures = int(rc.durable().get(fail_key) or 0)
+    delay = _lockout_delay(cfg, failures)
+    if delay:
+        raise RateLimited(
+            "Too many failed attempts. Please wait before trying again.",
+            retry_after=delay,
+        )
 
-    if user is None or not user.is_active or not verify_password(user.password_hash, password):
-        if fail_key:
-            pipe = rc.durable().pipeline()
-            pipe.incr(fail_key)
-            pipe.expire(fail_key, timedelta(hours=1))
-            pipe.execute()
+    if user is None or not user.is_active or not password_ok:
+        pipe = rc.durable().pipeline()
+        pipe.incr(fail_key)
+        pipe.expire(fail_key, timedelta(hours=1))
+        pipe.execute()
         # Same message either way — do not reveal whether the address exists.
         raise Unauthorized("Email or password is incorrect.")
 
@@ -120,14 +148,14 @@ def refresh(session: Session, cfg: Config, raw_refresh: str,
     try:
         pair, user = tk.rotate_refresh_token(session, cfg, raw_refresh, device_id)
     except tk.TheftDetected as theft:
-        handle_theft(theft.user_id, theft.reason)
+        handle_theft(cfg, theft.user_id, theft.reason)
         raise Unauthorized(
             "Your session was ended for security reasons. Please sign in again."
         ) from theft
     return user, pair
 
 
-def handle_theft(user_id: str, reason: str) -> None:
+def handle_theft(cfg: Config, user_id: str, reason: str) -> None:
     """1.6 — all four actions, committed in their OWN transaction.
 
     This deliberately does not take the caller's session. The refresh request
@@ -147,7 +175,7 @@ def handle_theft(user_id: str, reason: str) -> None:
             DevicePushToken.user_id == user_id
         ).delete(synchronize_session=False)
 
-    tk.set_tokens_valid_after(user_id)                                   # 2 (Redis)
+    tk.set_tokens_valid_after(user_id, cfg)                              # 2 (Redis)
 
     # 4 — must not happen silently. Wired to the alerting channel (Module 10):
     # a durable AppIssue row, not just a console log line that vanishes.
@@ -181,7 +209,14 @@ def logout(session: Session, claims: dict, raw_refresh: str | None) -> None:
                 RefreshToken.token_hash == tk.hash_token(raw_refresh)
             )
         )
-        if row is not None and row.revoked_at is None:
+        # Found live (third-pass code audit): this revoked by hash alone,
+        # with no check that the token actually belongs to the caller —
+        # anyone who obtained another user's raw refresh token could use it
+        # to force-revoke that user's session. Same as a not-found token,
+        # not an error: this call is "sign out this device," and a refresh
+        # token that isn't this user's own was never a session of theirs to
+        # begin with.
+        if row is not None and row.user_id == claims["sub"] and row.revoked_at is None:
             row.revoked_at = tk.now_utc()
 
 
@@ -256,7 +291,7 @@ def confirm_password_reset(session: Session, cfg: Config,
     # Someone resetting because they suspect compromise must not leave the
     # attacker's session alive (1.9).
     tk.revoke_all_refresh_tokens(session, user.id)
-    tk.set_tokens_valid_after(user.id)
+    tk.set_tokens_valid_after(user.id, cfg)
     rc.durable().delete(rc.key_login_failures(user.id))
 
 
@@ -286,23 +321,33 @@ def change_password(session: Session, cfg: Config, user_id: str, *,
     # already leaked. This device's refresh token is revoked too — signing
     # in again with the new password is the expected next step.
     tk.revoke_all_refresh_tokens(session, user.id)
-    tk.set_tokens_valid_after(user.id)
+    tk.set_tokens_valid_after(user.id, cfg)
     rc.durable().delete(rc.key_login_failures(user.id))
 
 
 # --- Account deletion ------------------------------------------------------
 
-def delete_account(session: Session, user_id: str, *, pitr_days: int = 35) -> None:
-    """1.10 — soft delete now, and leave a record that survives a restore."""
+def delete_account(session: Session, cfg: Config, user_id: str, *, password: str,
+                   pitr_days: int = 35) -> None:
+    """1.10 — soft delete now, and leave a record that survives a restore.
+
+    Found live (third-pass code audit): the single most destructive action in
+    this whole module used to require only a valid session (@require_auth) —
+    change_password already re-checks the current password before proceeding;
+    this did not. Now mirrors that same re-authentication step, so a
+    hijacked/leaked access token alone isn't enough to permanently delete the
+    account — the caller must prove they still know the password too."""
     user = session.get(User, user_id)
     if user is None or not user.is_active:
         return
+    if not verify_password(user.password_hash, password):
+        raise ValidationError("Password is incorrect.")
 
     now = tk.now_utc()
     user.deleted_at = now
 
     tk.revoke_all_refresh_tokens(session, user_id)
-    tk.set_tokens_valid_after(user_id)
+    tk.set_tokens_valid_after(user_id, cfg)
     session.query(DevicePushToken).filter(
         DevicePushToken.user_id == user_id
     ).delete(synchronize_session=False)

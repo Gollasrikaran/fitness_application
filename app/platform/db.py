@@ -9,7 +9,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Iterator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 
@@ -39,6 +40,23 @@ def init_engine(database_url: str, echo: bool = False) -> None:
         connect_args={"prepare_threshold": None} if "psycopg" in database_url else {},
     )
     _SessionFactory = sessionmaker(bind=_engine, expire_on_commit=False)
+
+    # Found live (code audit): create_engine() is lazy — it never opens a
+    # real connection — so unlike redis_clients.init_redis() (which pings
+    # both instances immediately and fails fast if either is unreachable),
+    # this app could boot to a "healthy" state with Postgres completely
+    # unreachable, only discovered on the first real request. Probing here
+    # matches the same fail-fast philosophy this module's own docstring and
+    # config.py both already commit to elsewhere.
+    try:
+        with _engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except SQLAlchemyError as exc:
+        raise RuntimeError(
+            f"Could not connect to the database at boot ({exc}). Refusing to "
+            "start with an unreachable database rather than failing silently "
+            "on the first real request."
+        ) from exc
 
 
 def get_engine():

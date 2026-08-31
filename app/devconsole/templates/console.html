@@ -174,7 +174,11 @@ async function stealToken() {
              {body: {refresh_token: RT}, device: "attacker-laptop"});
 }
 async function deleteAccount() {
-  await call("DELETE", "/v1/account", {token: AT});
+  // DELETE /v1/account now requires re-confirming the password (found live,
+  // third-pass code audit — the most destructive action in the app used to
+  // need only a valid session) — reuse the same password field already on
+  // this screen rather than adding a separate prompt.
+  await call("DELETE", "/v1/account", {body: {password: $("password").value}, token: AT});
   AT = null; RT = null; paint();
 }
 

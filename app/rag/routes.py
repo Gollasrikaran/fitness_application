@@ -40,18 +40,71 @@ def quota():
         return jsonify(service.remaining_quota(s, g.user_id))
 
 
+@bp.get("/history")
+@require_auth
+def history():
+    """5.7 — the actual transcript, so the chat screen has something to redraw
+    on login instead of the conversation silently resetting to blank."""
+    with session_scope() as s:
+        return jsonify({"history": service.chat_history(s, g.user_id)})
+
+
 @bp.post("/query")
 @require_auth
 def query():
     d = _body()
     cfg = _rag_config()
     confirmation = d.get("condition_confirmation")
-    if confirmation is not None and not isinstance(confirmation, dict):
-        raise ValidationError("condition_confirmation must be an object.")
+    if confirmation is not None:
+        if not isinstance(confirmation, dict):
+            raise ValidationError("condition_confirmation must be an object.")
+        # Found live (third-pass code audit): the outer object was checked but
+        # not its "code" field — a non-string, unhashable value (a list/dict)
+        # reached `code not in valid_codes` in service.py and raised an
+        # uncaught TypeError instead of a clean 422.
+        code = confirmation.get("code")
+        if code is not None and not isinstance(code, str):
+            raise ValidationError("condition_confirmation.code must be a string.")
+    escalation_confirmation = d.get("escalation_confirmation")
+    if escalation_confirmation is not None:
+        if not isinstance(escalation_confirmation, dict):
+            raise ValidationError("escalation_confirmation must be an object.")
+        # Same bug class: a non-string activity_type (e.g. a list) survived
+        # `(... or "").strip()` in service.py and raised an uncaught
+        # AttributeError instead of a clean 422.
+        activity_type = escalation_confirmation.get("activity_type")
+        if activity_type is not None and not isinstance(activity_type, str):
+            raise ValidationError("escalation_confirmation.activity_type must be a string.")
+    program_confirmation = d.get("program_confirmation")
+    if program_confirmation is not None:
+        if not isinstance(program_confirmation, dict):
+            raise ValidationError("program_confirmation must be an object.")
+        # Same bug class as the two checks above: validate the inner field's
+        # type here too, rather than letting a malformed value reach service.py.
+        activity_types = program_confirmation.get("activity_types")
+        if activity_types is not None and (
+            not isinstance(activity_types, list)
+            or not all(isinstance(a, str) for a in activity_types)
+        ):
+            raise ValidationError("program_confirmation.activity_types must be a list of strings.")
+    revert_confirmation = d.get("revert_confirmation")
+    if revert_confirmation is not None:
+        if not isinstance(revert_confirmation, dict):
+            raise ValidationError("revert_confirmation must be an object.")
+        activity_types = revert_confirmation.get("activity_types")
+        if activity_types is not None and (
+            not isinstance(activity_types, list)
+            or not all(isinstance(a, str) for a in activity_types)
+        ):
+            raise ValidationError("revert_confirmation.activity_types must be a list of strings.")
     with session_scope() as s:
         return jsonify(service.answer_query(
             s, g.user_id, d.get("question") or "",
             rag_db_url=cfg.rag_database_url,
             openrouter_api_key=cfg.openrouter_api_key,
             condition_confirmation=confirmation,
+            escalation_confirmation=escalation_confirmation,
+            program_confirmation=program_confirmation,
+            revert_confirmation=revert_confirmation,
+            rlm_enabled=cfg.rlm_chat_analysis_enabled,
         ))

@@ -116,16 +116,25 @@ def denylist_access_token(claims: dict) -> None:
         rc.durable().setex(rc.key_revoked_jwt(claims["jti"]), ttl, "1")
 
 
-def set_tokens_valid_after(user_id: str, when: datetime | None = None) -> None:
+def set_tokens_valid_after(user_id: str, cfg: Config, when: datetime | None = None) -> None:
     """1.6 / 1.9 — invalidate every access token issued before now.
 
     TTL matches the longest possible access-token lifetime; past that point no
     token issued before `when` can still be live, so the key is dead weight.
+
+    Found live (code audit): this TTL used to be a hardcoded 2 hours,
+    independent of cfg.access_token_ttl. Correct only by coincidence while
+    the configured TTL stays under 2 hours — raise ACCESS_TOKEN_TTL_MINUTES
+    past that (a plausible mobile-UX tuning change) and a token minted just
+    before this key expired would silently become valid again, defeating
+    theft response, forced logout on password reset/change, and forced
+    logout on account deletion all at once. A small safety margin is added
+    on top so the key strictly outlives the longest token it must cover.
     """
     when = when or now_utc()
     rc.durable().setex(
         rc.key_tokens_valid_after(user_id),
-        timedelta(hours=2),
+        cfg.access_token_ttl + timedelta(minutes=5),
         str(int(when.timestamp())),
     )
 
@@ -188,7 +197,16 @@ def rotate_refresh_token(
     Raises TheftDetected for reuse the grace window does not excuse.
     """
     token_hash = hash_token(raw_token)
-    row = session.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
+    # Found live (code audit): without a row lock, two near-simultaneous
+    # requests presenting the same not-yet-rotated token could both read
+    # rotated_at IS NULL, both rotate independently, and neither would be
+    # flagged as reuse — defeating the theft-detection guarantee this
+    # function exists to provide. FOR UPDATE serializes concurrent attempts
+    # on this exact row: the second request blocks until the first commits
+    # its rotation, then correctly re-reads it as already-rotated.
+    row = session.scalar(
+        select(RefreshToken).where(RefreshToken.token_hash == token_hash).with_for_update()
+    )
     if row is None:
         raise Unauthorized("Unknown refresh token")
 
@@ -213,6 +231,7 @@ def rotate_refresh_token(
                     RefreshToken.revoked_at.is_(None),
                 )
                 .order_by(RefreshToken.created_at.desc())
+                .with_for_update()
             )
             if fresh is not None:
                 user = session.get(User, row.user_id)

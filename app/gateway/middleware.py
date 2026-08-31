@@ -19,15 +19,37 @@ from app.platform.errors import Forbidden, RateLimited, Unauthorized
 
 
 def _client_ip() -> str:
-    # Trust the platform's forwarded header; Railway/Nginx sets it.
+    # Trust the platform's forwarded header; Railway/Nginx sets it. Take the
+    # RIGHTMOST entry, not the leftmost (found live, code audit): each hop
+    # APPENDS the IP it directly observed, so the last entry is the one the
+    # trusted proxy itself saw on the wire and the client cannot forge — the
+    # leftmost entries are whatever the client chose to send, and trusting
+    # them let an attacker reset this limiter every request by sending a
+    # fresh fake value. This assumes exactly one trusted proxy hop in front
+    # of the app (Railway/Nginx); if a CDN or a second proxy is ever added
+    # in front of that, this needs to skip that many more trailing entries.
     fwd = request.headers.get("X-Forwarded-For", "")
     if fwd:
-        return fwd.split(",")[0].strip()
+        parts = [p.strip() for p in fwd.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
     return request.remote_addr or "unknown"
 
 
 def _device_id() -> str:
-    """Stable per-install identifier from the client (1.4). Never an IP."""
+    """Stable per-install identifier from the client (1.4). Never an IP.
+
+    Unlike _client_ip, there is no server-observed value to fall back on
+    here — this is a bare client-supplied header with no cryptographic
+    binding to a real device (found live, code audit: sending a fresh random
+    value per request bypasses rl_device_per_hour entirely). A real fix needs
+    a server-issued, signed device credential established during a prior
+    authenticated step, which is a bigger feature than this rate limiter can
+    fix on its own. The corrected _client_ip above is the limiter that
+    actually holds against a spoofing attacker; this one is defense-in-depth
+    against a legitimate client's own bug (e.g. regenerating an id on every
+    launch), not a hard guarantee against a deliberate attacker.
+    """
     return request.headers.get("X-Device-Id", "").strip() or "unknown-device"
 
 
