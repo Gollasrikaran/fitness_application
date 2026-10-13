@@ -48,6 +48,15 @@ def signup(session: Session, cfg: Config, email: str, password: str,
     email = _normalise_email(email)
     if "@" not in email or len(email) < 3:
         raise ValidationError("Enter a valid email address.")
+    # Found live: only a MINIMUM length was checked — User.email is
+    # String(320) (app/auth/models.py), so an email longer than that passed
+    # this check, reached the INSERT, and the database's own "value too long
+    # for type character varying(320)" error surfaced as an uncaught 500
+    # instead of a clean 422. Same class of bug already fixed once for
+    # client_entry_id (app/profile/routes.py) — applying the same proactive
+    # length check here instead of letting the database reject it uncaught.
+    if len(email) > 320:
+        raise ValidationError("Email address is too long.")
     validate_password(
         password,
         min_length=cfg.password_min_length,
@@ -121,12 +130,33 @@ def login(session: Session, cfg: Config, email: str, password: str,
     failures = int(rc.durable().get(fail_key) or 0)
     delay = _lockout_delay(cfg, failures)
     if delay:
+        # Report the REAL remaining lockout, not the formula's nominal delay.
+        # The counter cannot advance past the threshold (this raise happens
+        # before the increment below), so `_lockout_delay` returns a constant
+        # base value — while the account actually stays locked until the
+        # failure key's own TTL expires. Sending that constant as Retry-After
+        # told a locked-out user "30 seconds" when the truth was up to an
+        # hour, so they retry, fail, and learn nothing.
+        ttl = rc.durable().ttl(fail_key)
         raise RateLimited(
             "Too many failed attempts. Please wait before trying again.",
-            retry_after=delay,
+            retry_after=ttl if isinstance(ttl, int) and ttl > 0 else delay,
         )
 
     if user is None or not user.is_active or not password_ok:
+        # The expiry is deliberately refreshed on EVERY failure that reaches
+        # here, and that is not the bug it looks like: the RateLimited raise
+        # above returns before this block once the threshold is hit, so a
+        # locked-out account can never renew its own window — the renewals
+        # only ever happen on failures 1..threshold. The window therefore
+        # ends one hour after the last sub-threshold failure, which is the
+        # intended self-clearing behaviour.
+        #
+        # (An earlier pass changed this to set the TTL only once, on the
+        # first failure, on the mistaken theory that a sustained attacker
+        # could renew it forever. That made the lockout strictly weaker: an
+        # attacker pacing one guess every ~12 minutes let the key expire
+        # mid-sequence and never tripped the threshold at all. Reverted.)
         pipe = rc.durable().pipeline()
         pipe.incr(fail_key)
         pipe.expire(fail_key, timedelta(hours=1))
@@ -148,32 +178,47 @@ def refresh(session: Session, cfg: Config, raw_refresh: str,
     try:
         pair, user = tk.rotate_refresh_token(session, cfg, raw_refresh, device_id)
     except tk.TheftDetected as theft:
-        handle_theft(cfg, theft.user_id, theft.reason)
+        handle_theft(session, cfg, theft.user_id, theft.reason)
         raise Unauthorized(
             "Your session was ended for security reasons. Please sign in again."
         ) from theft
     return user, pair
 
 
-def handle_theft(cfg: Config, user_id: str, reason: str) -> None:
-    """1.6 — all four actions, committed in their OWN transaction.
+def handle_theft(session: Session, cfg: Config, user_id: str, reason: str) -> None:
+    """1.6 — all four actions, made durable before the caller's 401 unwinds.
 
-    This deliberately does not take the caller's session. The refresh request
-    that triggered detection must fail with 401, and that exception unwinds the
-    caller's `session_scope`, which rolls back. Writing the revocations into that
-    session would mean they are silently discarded at the moment they matter most
-    — leaving the attacker holding a refresh token that still rotates.
+    The requirement this has to satisfy: the refresh request that triggered
+    detection must fail with 401, and that exception unwinds the caller's
+    `session_scope`, which rolls back — so the revocations must not be left
+    sitting unflushed in that session, or they are silently discarded at the
+    moment they matter most, leaving the attacker holding a token that still
+    rotates. The explicit `commit()` below is what guarantees that; a later
+    rollback has nothing left to undo.
 
-    Verified by the `theft_revokes_everything` test: without a separate
-    transaction, step 11 of the smoke run returns 200 instead of 401.
+    Found live (code audit) — this used to open its OWN second session to get
+    that durability, which self-deadlocked against its own caller:
+    rotate_refresh_token holds `SELECT ... FOR UPDATE` on the presented row
+    (tokens.py) for the life of the caller's transaction, and
+    revoke_all_refresh_tokens' `UPDATE ... WHERE revoked_at IS NULL` targets
+    that very row. The second session blocked on the first session's lock
+    while the first session sat blocked in Python waiting for the second to
+    return. Postgres saw only one waiter, so its deadlock detector never
+    fired and nothing timed out — the request hung indefinitely, holding two
+    pooled connections. With pool_size=5 + max_overflow=5, five such events
+    (a changed X-Device-Id is enough to trigger one) would wedge every
+    connection and take the API down until a restart.
+
+    Using the caller's own session removes the second connection, and with it
+    the lock conflict.
     """
-    from app.platform.db import session_scope
-
-    with session_scope() as security_session:
-        tk.revoke_all_refresh_tokens(security_session, user_id)          # 1
-        security_session.query(DevicePushToken).filter(                  # 3
-            DevicePushToken.user_id == user_id
-        ).delete(synchronize_session=False)
+    tk.revoke_all_refresh_tokens(session, user_id)                       # 1
+    session.query(DevicePushToken).filter(                               # 3
+        DevicePushToken.user_id == user_id
+    ).delete(synchronize_session=False)
+    # Durable now, before the Unauthorized above unwinds the request. This
+    # also releases the FOR UPDATE lock held since rotate_refresh_token.
+    session.commit()
 
     tk.set_tokens_valid_after(user_id, cfg)                              # 2 (Redis)
 

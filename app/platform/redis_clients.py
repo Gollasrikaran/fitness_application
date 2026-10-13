@@ -101,3 +101,21 @@ def key_login_failures_by_email(email: str) -> str:
     how many attempts — letting them tell "exists" from "doesn't exist"
     purely by which status code eventually showed up, regardless of timing."""
     return f"login:fail:email:{email}"
+
+
+def key_pending_condition_confirm(user_id: str) -> str:
+    """Proof that THIS user was just asked "which condition is this?" and
+    already paid a quota slot for that turn without receiving an answer.
+
+    Exists so the follow-up confirmation can be answered without charging a
+    second slot, WITHOUT trusting the client to say so. A client-asserted
+    `condition_confirmation` alone must never skip the quota check: the
+    confirmation branch runs a full, billed retrieve-and-answer, so anyone
+    could otherwise get unlimited free LLM answers just by always sending
+    that field. Set when the server returns needs_condition_selection,
+    consumed (atomically deleted) by the confirmation turn.
+
+    Deliberately in Redis, not the Postgres quota table: if this key is ever
+    lost the user is charged a second slot — the old, minor bug — rather
+    than getting free answers, which is the direction this should fail in."""
+    return f"rehab:pending_condition:{user_id}"

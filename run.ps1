@@ -68,4 +68,4 @@ Write-Host "Starting on http://127.0.0.1:$Port  (Ctrl+C to stop)"
 Write-Host "Browsable: /  /healthz  /v1/app/config   - everything else is POST"
 Write-Host ""
 
-python -m flask --app wsgi run --port $Port
+python -m flask --app wsgi run --host 0.0.0.0 --port $Port

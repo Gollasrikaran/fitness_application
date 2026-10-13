@@ -6,18 +6,23 @@ no suggestions rather than unfiltered ones.
 """
 from __future__ import annotations
 
+import itertools
 import math
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth.models import User
-from app.catalog.models import ActivityTaxonomy, Condition, SafetyGridCell, VideoCatalog
-from app.platform.errors import Forbidden, NotFound, ValidationError
+from app.catalog.models import (
+    ActivityTaxonomy, Condition, ConditionInteractionCell, SafetyGridCell, VideoCatalog,
+)
+from app.platform.errors import Conflict, Forbidden, NotFound, ValidationError
 from app.profile.models import (
-    ActivityLog, CustomExercise, OverrideConsent, UserCondition, UserProfile, UserProgram,
+    ActivityLog, CustomExercise, OverrideConsent, PersonalBest, UserCondition, UserProfile,
+    UserProgram, WorkoutSession,
 )
 
 IST = timezone(timedelta(hours=5, minutes=30))  # single market (3.3)
@@ -60,6 +65,18 @@ BANDS = {"beginner", "1m", "2m", "3m", "experienced"}
 MAX_LOGGABLE_AMOUNT = 100_000
 MAX_LOGGABLE_SETS = 10_000
 MAX_TOTAL_VOLUME = 99_999_999
+
+# Mirrors ActivityLog's own CheckConstraint("source IN ('manual','voice')").
+# Kept here so an unknown value is a clean 422 at the service boundary rather
+# than an IntegrityError from the database.
+LOG_SOURCES = {"manual", "voice"}
+
+# A flagged-implausible log for a distance/duration activity (never a
+# reps/sets exercise — see log_activity) that ranks in the user's own top 5
+# for that activity is treated as a genuine extraordinary effort rather than
+# a likely typo/glitch: it's kept here for display and, unlike an ordinary
+# implausible log, counts as a real day for streak()/suggestions_today().
+PERSONAL_BEST_LIMIT = 5
 
 # How many activities a tier shows, sliced from the full priority-ordered,
 # already-condition-filtered list. "experienced" is None: no cap, show
@@ -151,10 +168,31 @@ def complete_onboarding(session: Session, user_id: str, *, age: int, goal: str,
     session.flush()
 
     if is_referred(session, user_id):
-        # Deliberately no program. A referred user gets no exercise content at all.
-        session.execute(delete(UserProgram).where(UserProgram.user_id == user_id))
+        # Deliberately no program shown while referred. Soft-suspend, never
+        # delete — this is reachable mid-chat (the RAG condition-confirmation
+        # flow calls complete_onboarding too), so a hard delete here meant
+        # confirming a refer-bucket condition permanently destroyed every
+        # program row and all earned progression, with no way back even if
+        # the condition was later removed. Every other suspension path in
+        # this file (condition_safety, user_removed, sport_focus_change) is
+        # reversible; this one was the sole exception.
+        session.execute(
+            update(UserProgram)
+            .where(UserProgram.user_id == user_id, UserProgram.status == "active")
+            .values(status="suspended", suspended_reason="referred")
+        )
         return {"referred": True, "message": REFERRAL_MESSAGE, "program": []}
 
+    # No longer referred (or never was) — release anything held by the
+    # "referred" suspension above, so it's back to a normal active row for
+    # build_program's own is_blocked logic to evaluate on its own merits
+    # (which may re-suspend it for a real, current safety reason — that's
+    # condition_safety, a separate and already-reversible path).
+    session.execute(
+        update(UserProgram)
+        .where(UserProgram.user_id == user_id, UserProgram.suspended_reason == "referred")
+        .values(status="active", suspended_reason=None)
+    )
     program = build_program(session, user_id)
     return {"referred": False, "message": None, "program": program}
 
@@ -201,15 +239,75 @@ def update_profile(session: Session, user_id: str, *, fields: dict) -> dict:
 
 # --- Program ---------------------------------------------------------------
 
+_VERDICT_RANK = {"safe": 0, "modify": 1, "avoid": 2}
+
+
+def _interaction_verdicts(session: Session, user_id: str) -> dict[str, dict]:
+    """Combined-conditions safety check (MULTI_CONDITION_INTERACTION_SAFETY_PLAN.md):
+    activity_type -> the worst interaction verdict across every PAIR of this
+    user's own conditions, for activities where some reviewed pair+activity
+    row exists. Empty for a user with 0 or 1 conditions (no pair possible).
+
+    Deliberately separate from _blocked_activities/_modified_activities'
+    single-condition query — this table is sparse (no coverage requirement,
+    see ConditionInteractionCell's docstring), so it can never be the sole
+    source of a verdict, only an escalation folded into those two functions
+    and into _worst_verdict below.
+    """
+    codes = sorted(session.scalars(
+        select(UserCondition.condition_code).where(UserCondition.user_id == user_id)
+    ).all())
+    if len(codes) < 2:
+        return {}
+    pairs = set(itertools.combinations(codes, 2))  # already sorted -> canonical order
+    # Both columns individually IN the user's codes is a correct, sufficient
+    # filter: since condition_a < condition_b is enforced at write time, a row
+    # passing this is guaranteed to BE one of `pairs`, not just touch one.
+    rows = session.execute(
+        select(ConditionInteractionCell)
+        .where(ConditionInteractionCell.condition_a.in_(codes),
+               ConditionInteractionCell.condition_b.in_(codes))
+    ).scalars().all()
+    if not rows:
+        return {}
+    names = dict(session.execute(
+        select(Condition.condition_code, Condition.display_name)
+        .where(Condition.condition_code.in_(codes))
+    ).all())
+
+    out: dict[str, dict] = {}
+    for cell in rows:
+        assert (cell.condition_a, cell.condition_b) in pairs  # see filter comment above
+        current = out.get(cell.activity_type)
+        if current is not None and _VERDICT_RANK[current["verdict"]] >= _VERDICT_RANK[cell.verdict]:
+            continue
+        out[cell.activity_type] = {
+            "verdict": cell.verdict,
+            "note": cell.note,
+            "reviewed_at": cell.reviewed_at,
+            "condition_a_code": cell.condition_a,
+            "condition_a_name": names.get(cell.condition_a, cell.condition_a),
+            "condition_b_code": cell.condition_b,
+            "condition_b_name": names.get(cell.condition_b, cell.condition_b),
+        }
+    return out
+
+
 def _blocked_activities(session: Session, user_id: str) -> dict[str, str]:
-    """activity_type -> note, for anything the grid marks `avoid`."""
+    """activity_type -> note, for anything the grid marks `avoid` — either a
+    single condition on its own, or two of the user's conditions together
+    (see _interaction_verdicts)."""
     rows = session.execute(
         select(SafetyGridCell.activity_type, SafetyGridCell.note)
         .join(UserCondition,
               UserCondition.condition_code == SafetyGridCell.condition_code)
         .where(UserCondition.user_id == user_id, SafetyGridCell.verdict == "avoid")
     ).all()
-    return {a: n for a, n in rows}
+    out = {a: n for a, n in rows}
+    for activity_type, interaction in _interaction_verdicts(session, user_id).items():
+        if interaction["verdict"] == "avoid":
+            out.setdefault(activity_type, interaction["note"])
+    return out
 
 
 def _modified_activities(session: Session, user_id: str) -> dict[str, str]:
@@ -219,7 +317,39 @@ def _modified_activities(session: Session, user_id: str) -> dict[str, str]:
               UserCondition.condition_code == SafetyGridCell.condition_code)
         .where(UserCondition.user_id == user_id, SafetyGridCell.verdict == "modify")
     ).all()
-    return {a: n for a, n in rows}
+    out = {a: n for a, n in rows}
+    blocked = _blocked_activities(session, user_id)
+    for activity_type, interaction in _interaction_verdicts(session, user_id).items():
+        # avoid still wins over modify — same precedence _VERDICT_RANK already
+        # gives these two within a single condition's own cells.
+        if interaction["verdict"] == "modify" and activity_type not in blocked:
+            out[activity_type] = interaction["note"]
+    return out
+
+
+def _usefulness_ranks(session: Session, user_id: str) -> dict[str, int]:
+    """activity_type -> best (lowest/most useful) rank across the user's own
+    conditions, from the reviewed safety_grid.usefulness_rank column.
+
+    A user can have several conditions at once, each with its own "most
+    useful first" ordering for the SAME activity — e.g. Glute Bridge might be
+    rank 2 for gout but rank 6 for arthritis_knee. Taking the MIN means an
+    activity that's a top pick for ANY of the user's conditions surfaces
+    early, rather than getting buried by a condition it's merely fine for.
+    `avoid` cells never carry a rank (enforced at load time) and are excluded
+    here — an activity a user cannot be shown at all must never win a "most
+    useful" comparison against one they can.
+    """
+    rows = session.execute(
+        select(SafetyGridCell.activity_type, func.min(SafetyGridCell.usefulness_rank))
+        .join(UserCondition,
+              UserCondition.condition_code == SafetyGridCell.condition_code)
+        .where(UserCondition.user_id == user_id,
+               SafetyGridCell.verdict != "avoid",
+               SafetyGridCell.usefulness_rank.is_not(None))
+        .group_by(SafetyGridCell.activity_type)
+    ).all()
+    return dict(rows)
 
 
 def build_program(session: Session, user_id: str) -> list[dict]:
@@ -309,6 +439,7 @@ def get_program(session: Session, user_id: str, *, include_suspended: bool = Fal
     if is_referred(session, user_id):
         return []
     modified = _modified_activities(session, user_id)
+    ranks = _usefulness_ranks(session, user_id)
     query = (
         select(UserProgram, ActivityTaxonomy)
         .join(ActivityTaxonomy,
@@ -332,12 +463,20 @@ def get_program(session: Session, user_id: str, *, include_suspended: bool = Fal
         if t.prescription_type == "distance" and t.est_pace_min_per_km:
             # An honest time estimate without storing a second target.
             est = round(amount * float(t.est_pace_min_per_km))
+        # Per-set breakdown (PER_SET_PROGRESSION_PLAN.md): the real diverging
+        # values when this activity has adopted per-set tracking, or a
+        # uniform list derived from the blended amount otherwise — the
+        # frontend always gets a real array of length `sets` to render a
+        # per-set table from, regardless of which system this entry is on.
+        set_targets = ([float(v) for v in p.set_targets] if p.set_targets is not None
+                       else [amount] * p.target_sets)
         out.append({
             "activity_type": p.activity_type,
             "display_name": t.display_name,
             "prescription_type": t.prescription_type,
             "sets": p.target_sets,
             "amount": amount,
+            "set_targets": set_targets,
             "unit": p.unit,
             "per_side": t.per_side,
             "rest_seconds": t.rest_seconds,
@@ -350,6 +489,13 @@ def get_program(session: Session, user_id: str, *, include_suspended: bool = Fal
             "demo_images": t.demo_images,
             "instructions": t.instructions,
             "priority_order": t.priority_order,
+            # Condition-personalized "most useful first" rank (see
+            # _usefulness_ranks). Falls back to the generic taxonomy order
+            # only if this user somehow has no rank for it at all (can't
+            # happen for a real condition set — every supported condition's
+            # safe/modify cells are required to carry a rank — but a fallback
+            # keeps a data gap from ever hiding an activity outright).
+            "usefulness_rank": ranks.get(p.activity_type, t.priority_order),
             "source": p.source,
         })
     return out
@@ -357,13 +503,18 @@ def get_program(session: Session, user_id: str, *, include_suspended: bool = Fal
 
 # --- Manual program control (14.7) ------------------------------------------
 
-_VERDICT_RANK = {"safe": 0, "modify": 1, "avoid": 2}
-
-
 def _worst_verdict(session: Session, user_id: str, activity_type: str) -> dict | None:
-    """The most restrictive verdict across all of a user's conditions for one
-    activity — the one shown in the override dialog. None if none of their
-    conditions has a grid row for it at all (as safe as `none`)."""
+    """The most restrictive verdict for one activity, across all of a user's
+    conditions AND every pair of them (combined-conditions check, see
+    _interaction_verdicts) — the one shown in the override dialog. None if
+    neither source has anything for this activity (as safe as `none`).
+
+    Return shape carries a `kind`: "single" (unchanged shape from before this
+    feature — one condition_code/condition_name) or "pair" (two conditions,
+    condition_a_code/name + condition_b_code/name instead). Callers branch on
+    `kind` to pick the right warning wording (see _override_warning vs.
+    _override_warning_pair) and to record the right OverrideConsent columns.
+    """
     rows = session.execute(
         select(SafetyGridCell.verdict, SafetyGridCell.note, SafetyGridCell.reviewed_at,
                Condition.condition_code, Condition.display_name)
@@ -372,11 +523,32 @@ def _worst_verdict(session: Session, user_id: str, activity_type: str) -> dict |
         .where(UserCondition.user_id == user_id,
                SafetyGridCell.activity_type == activity_type)
     ).all()
-    if not rows:
-        return None
-    worst = max(rows, key=lambda r: _VERDICT_RANK[r.verdict])
-    return {"condition_code": worst.condition_code, "condition_name": worst.display_name,
-            "verdict": worst.verdict, "note": worst.note, "reviewed_at": worst.reviewed_at}
+    single = None
+    if rows:
+        worst = max(rows, key=lambda r: _VERDICT_RANK[r.verdict])
+        single = {"kind": "single", "condition_code": worst.condition_code,
+                  "condition_name": worst.display_name, "verdict": worst.verdict,
+                  "note": worst.note, "reviewed_at": worst.reviewed_at}
+
+    interaction = _interaction_verdicts(session, user_id).get(activity_type)
+    pair = None
+    if interaction is not None:
+        pair = {"kind": "pair", "verdict": interaction["verdict"], "note": interaction["note"],
+                "reviewed_at": interaction["reviewed_at"],
+                "condition_a_code": interaction["condition_a_code"],
+                "condition_a_name": interaction["condition_a_name"],
+                "condition_b_code": interaction["condition_b_code"],
+                "condition_b_name": interaction["condition_b_name"]}
+
+    if pair is None:
+        return single
+    if single is None:
+        return pair
+    # A tie prefers the pair result — it's the more specific, more useful
+    # reason to show the user (names both conditions, not just one).
+    if _VERDICT_RANK[pair["verdict"]] >= _VERDICT_RANK[single["verdict"]]:
+        return pair
+    return single
 
 
 def _override_warning(condition_name: str) -> str:
@@ -392,6 +564,18 @@ def _override_warning(condition_name: str) -> str:
             "has examined you and specifically advised you to do it.")
 
 
+def _override_warning_pair(condition_a_name: str, condition_b_name: str) -> str:
+    """Combined-conditions variant of _override_warning — used when the
+    `avoid` verdict came from a condition PAIR (_worst_verdict kind="pair"),
+    not a single condition. Names both, and says explicitly that either one
+    alone would be fine, so the warning doesn't read as a generic duplicate
+    of the single-condition message."""
+    return (f"You've told us you have both {condition_a_name} and {condition_b_name}. "
+            "Together, this combination isn't recommended for this exercise, even though "
+            "either one alone might be fine. Only continue if a doctor has examined you "
+            "and specifically advised you to do it.")
+
+
 def list_catalogue(session: Session, user_id: str) -> list[dict]:
     """14.7 / 13.3b — everything NOT already on the dashboard: tier-hidden
     activities the user hasn't grown into yet, and anything their condition
@@ -404,9 +588,12 @@ def list_catalogue(session: Session, user_id: str) -> list[dict]:
     if is_referred(session, user_id):
         raise Forbidden("Speak to a doctor before adding exercises to your program.")
     _program, visible, _band, _default, _optional = _dashboard_slice(session, user_id)
+    ranks = _usefulness_ranks(session, user_id)
+    taxonomy = session.scalars(
+        select(ActivityTaxonomy).order_by(ActivityTaxonomy.priority_order)).all()
+    taxonomy = sorted(taxonomy, key=lambda t: (ranks.get(t.activity_type, t.priority_order), t.priority_order))
     out = []
-    for t in session.scalars(
-            select(ActivityTaxonomy).order_by(ActivityTaxonomy.priority_order)).all():
+    for t in taxonomy:
         if t.activity_type in visible:
             continue
         v = _worst_verdict(session, user_id, t.activity_type)
@@ -441,19 +628,33 @@ def add_program_entry(session: Session, user_id: str, activity_type: str,
 
     worst = _worst_verdict(session, user_id, activity_type)
     if worst and worst["verdict"] == "avoid":
+        is_pair = worst["kind"] == "pair"
+        warning_text = (
+            _override_warning_pair(worst["condition_a_name"], worst["condition_b_name"])
+            if is_pair else _override_warning(worst["condition_name"])
+        )
         if not override_confirmed:
-            return {
+            response = {
                 "added": False, "needs_confirmation": True,
-                "condition_code": worst["condition_code"],
-                "condition_name": worst["condition_name"],
                 "verdict": "avoid",
-                "warning_text": _override_warning(worst["condition_name"]),
+                "warning_text": warning_text,
             }
+            if is_pair:
+                response["condition_code"] = worst["condition_a_code"]
+                response["condition_name"] = worst["condition_a_name"]
+                response["condition_code_2"] = worst["condition_b_code"]
+                response["condition_name_2"] = worst["condition_b_name"]
+            else:
+                response["condition_code"] = worst["condition_code"]
+                response["condition_name"] = worst["condition_name"]
+            return response
         session.add(OverrideConsent(
-            user_id=user_id, condition_code=worst["condition_code"],
+            user_id=user_id,
+            condition_code=worst["condition_a_code"] if is_pair else worst["condition_code"],
+            condition_code_2=worst["condition_b_code"] if is_pair else None,
             activity_type=activity_type, grid_verdict="avoid",
             grid_reviewed_at=worst["reviewed_at"],
-            warning_text=_override_warning(worst["condition_name"]),
+            warning_text=warning_text,
         ))
         source = "user_override"
     else:
@@ -611,13 +812,19 @@ def _tier_slice(items_by_priority: list[dict], band: str) -> tuple[set[str], set
     activity fills its spot, keeping the tier's usual count intact. Only when
     the safe pool itself runs out short does the count actually drop — never
     padded with anything unvetted.
+
+    Ordered by `usefulness_rank` (condition-personalized "most useful first",
+    see _usefulness_ranks) rather than the old flat `priority_order` — a
+    beginner with knee pain now sees Walking/Glute Bridge before a wrist
+    stretch that happens to rank higher generically. `priority_order` is kept
+    as the tiebreak for equal usefulness ranks, so ordering stays deterministic.
     """
     shown = TIER_SHOWN.get(band)
     if shown is None:
         return {i["activity_type"] for i in items_by_priority}, set()
     idx = TIER_ORDER.index(band)
     prev_shown = TIER_SHOWN[TIER_ORDER[idx - 1]] if idx > 0 else shown
-    ordered = sorted(items_by_priority, key=lambda i: i["priority_order"])
+    ordered = sorted(items_by_priority, key=lambda i: (i["usefulness_rank"], i["priority_order"]))
     default_n = min(prev_shown, len(ordered))
     optional_n = min(shown, len(ordered))
     default = {i["activity_type"] for i in ordered[:default_n]}
@@ -627,12 +834,103 @@ def _tier_slice(items_by_priority: list[dict], band: str) -> tuple[set[str], set
 
 # --- Logging ---------------------------------------------------------------
 
+def _personal_best_qualifies(session: Session, user_id: str, activity_type: str, value: float) -> bool:
+    """True if `value` would earn a spot in this user's top-PERSONAL_BEST_LIMIT
+    for `activity_type` — i.e. there's room, or it beats the current lowest
+    entry kept."""
+    current = session.scalars(
+        select(PersonalBest.value)
+        .where(PersonalBest.user_id == user_id, PersonalBest.activity_type == activity_type)
+        .order_by(PersonalBest.value.desc())
+    ).all()
+    if len(current) < PERSONAL_BEST_LIMIT:
+        return True
+    return Decimal(str(value)) > current[-1]
+
+
+def _save_personal_best(session: Session, user_id: str, activity_type: str, value: float,
+                        unit: str, log_id: str) -> None:
+    session.add(PersonalBest(
+        user_id=user_id, activity_type=activity_type, value=value, unit=unit,
+        source_log_id=log_id,
+    ))
+    session.flush()
+    rows = session.scalars(
+        select(PersonalBest)
+        .where(PersonalBest.user_id == user_id, PersonalBest.activity_type == activity_type)
+        .order_by(PersonalBest.value.desc())
+    ).all()
+    for extra in rows[PERSONAL_BEST_LIMIT:]:
+        session.delete(extra)
+
+
+def list_personal_bests(session: Session, user_id: str) -> dict:
+    """Grouped by activity_type, each list ordered best-first. Purely a
+    celebratory display list — never consulted by streak, progression, or
+    adherence math."""
+    rows = session.scalars(
+        select(PersonalBest)
+        .where(PersonalBest.user_id == user_id)
+        .order_by(PersonalBest.activity_type, PersonalBest.value.desc())
+    ).all()
+    out: dict[str, list[dict]] = {}
+    for r in rows:
+        out.setdefault(r.activity_type, []).append({
+            "value": float(r.value), "unit": r.unit,
+            "achieved_at": r.achieved_at.isoformat(),
+        })
+    return out
+
+
 def log_activity(session: Session, user_id: str, *, activity_type: str | None = None,
-                 custom_exercise_id: str | None = None, amount: float, sets: int = 1,
+                 custom_exercise_id: str | None = None, amount: float = 0.0, sets: int = 1,
                  unit: str | None = None, source: str = "manual",
-                 client_entry_id: str | None = None) -> dict:
+                 client_entry_id: str | None = None,
+                 workout_session_id: str | None = None,
+                 set_amounts: list[float] | None = None) -> dict:
     if bool(activity_type) == bool(custom_exercise_id):
         raise ValidationError("Provide exactly one of activity_type or custom_exercise_id.")
+    # Validated up front, before anything else: a bad workout_session_id
+    # must fail the whole entry cleanly rather than log the exercise and
+    # silently drop the session tag.
+    workout_session = (
+        _get_active_workout_session(session, user_id, workout_session_id)
+        if workout_session_id else None
+    )
+    # Per-set breakdown (e.g. [10, 8, 6]) — only meaningful for the official
+    # taxonomy's reps/hold exercises, never custom exercises (which have no
+    # taxonomy row to validate a shape against) and never distance/duration
+    # (already a single effort, nothing to break down). `sets`/`amount` are
+    # DERIVED here — length and average — rather than trusted separately, so
+    # every existing check below (positive, within caps, plausibility) runs
+    # unchanged against the real numbers instead of needing its own parallel
+    # validation path. Deriving `amount` as the plain average is what makes
+    # `row.total_volume(sets, amount)` below compute the true SUM of the real
+    # per-set values rather than an assumed-uniform total — sets * average ==
+    # sum, by definition — with no separate total-volume formula needed.
+    if set_amounts is not None:
+        if custom_exercise_id:
+            raise ValidationError("set_amounts is only supported for taxonomy activities.")
+        if not set_amounts:
+            raise ValidationError("set_amounts cannot be empty.")
+        if len(set_amounts) > MAX_LOGGABLE_SETS:
+            raise ValidationError(f"Cannot log more than {MAX_LOGGABLE_SETS} sets.")
+        for v in set_amounts:
+            if not math.isfinite(v):
+                raise ValidationError("Each value in set_amounts must be a real, finite number.")
+            # Found live: `v <= 0` alone let a value like 0.004 through — it's
+            # genuinely positive, but ActivityLog.set_amounts is
+            # Numeric(10,2), so storage rounds it to 0.00, which the
+            # database's own CHECK(amount > 0)-style constraint then rejects
+            # as an uncaught 500 instead of a clean validation error. Reject
+            # anything that would round to zero at the precision it's
+            # actually stored at, not just anything <= 0.
+            if round(v, 2) <= 0:
+                raise ValidationError("Each value in set_amounts must be greater than zero.")
+            if v > MAX_LOGGABLE_AMOUNT:
+                raise ValidationError(f"Each value in set_amounts cannot exceed {MAX_LOGGABLE_AMOUNT}.")
+        sets = len(set_amounts)
+        amount = sum(set_amounts) / sets
     # Found live (second-pass code audit): Python's json module accepts bare
     # NaN/Infinity literals by default (json.loads('{"amount": NaN}') ->
     # {'amount': nan}). NaN comparisons are always False, so `amount >
@@ -652,6 +950,15 @@ def log_activity(session: Session, user_id: str, *, activity_type: str | None = 
         # overlong value used to hit the database as an uncaught
         # "value too long" error instead of a clean 422.
         raise ValidationError("client_entry_id cannot exceed 64 characters.")
+    if source not in LOG_SOURCES:
+        # Found live (code audit): `source` went straight from the request
+        # body to the INSERT, guarded only by the table's own
+        # CheckConstraint("source IN ('manual','voice')") — so any other
+        # value surfaced as an uncaught IntegrityError (500), and in a batch
+        # call that single bad entry rolled back every other entry in the
+        # same transaction. An offline-replay client would then retry the
+        # whole doomed batch forever.
+        raise ValidationError(f"source must be one of: {', '.join(sorted(LOG_SOURCES))}")
 
     if custom_exercise_id:
         # 4.4 — same entry point, same validation shape as a taxonomy log;
@@ -673,7 +980,10 @@ def log_activity(session: Session, user_id: str, *, activity_type: str | None = 
             raise ValidationError(
                 f"{custom.name} is measured in {', '.join(sorted(allowed))}, not {unit}.")
         measurement_type = allowed[unit]
-        if amount <= 0:
+        # Found live: same gap as set_amounts above — amount is stored as
+        # Numeric(10,2); a value like 0.004 passes `amount <= 0` but rounds
+        # to 0.00 in storage, which the database then rejects uncaught.
+        if round(amount, 2) <= 0:
             raise ValidationError("Amount must be greater than zero.")
         if sets < 1:
             raise ValidationError("Sets must be at least 1.")
@@ -685,6 +995,10 @@ def log_activity(session: Session, user_id: str, *, activity_type: str | None = 
         implausible = Decimal(str(total)) > Decimal(str(CUSTOM_MEASUREMENT_DEFAULT_MAX[measurement_type]))
         prescription = f"{sets} x {amount} {unit}" if sets > 1 else f"{amount} {unit}"
         row_activity_type = None
+        # Personal Bests only cover curated taxonomy activities (walk, run,
+        # cycle, swim) — a custom exercise has no plausible_max_total to be
+        # "extraordinary" relative to, so it's never eligible.
+        extraordinary = False
     else:
         row = session.get(ActivityTaxonomy, activity_type)
         if row is None:
@@ -695,7 +1009,11 @@ def log_activity(session: Session, user_id: str, *, activity_type: str | None = 
             raise ValidationError(
                 f"{row.display_name} is measured in {row.amount_unit}, not {unit}."
             )
-        if amount <= 0:
+        # Found live: same gap as set_amounts/custom-exercise amount above —
+        # amount is stored as Numeric(10,2); a value like 0.004 passes
+        # `amount <= 0` but rounds to 0.00 in storage, which the database
+        # then rejects as an uncaught 500 instead of a clean 422.
+        if round(amount, 2) <= 0:
             raise ValidationError("Amount must be greater than zero.")
         if sets < 1:
             raise ValidationError("Sets must be at least 1.")
@@ -709,8 +1027,21 @@ def log_activity(session: Session, user_id: str, *, activity_type: str | None = 
             raise ValidationError(f"Total volume (amount x sets) cannot exceed {MAX_TOTAL_VOLUME}.")
         # 4.6 — kept and flagged, never rejected. A user's entry is theirs.
         implausible = Decimal(str(total)) > row.plausible_max_total
-        prescription = row.describe(sets, amount)
+        prescription = (
+            f"{', '.join(f'{v:g}' for v in set_amounts)} {unit}"
+            if set_amounts is not None else row.describe(sets, amount)
+        )
         row_activity_type = activity_type
+        # An implausible distance/duration effort (never reps/sets — those
+        # keep today's behaviour unchanged) that ranks in this user's own
+        # top-PERSONAL_BEST_LIMIT is a likely genuine extraordinary result,
+        # not a typo/glitch — see PersonalBest and the module docstring above
+        # PERSONAL_BEST_LIMIT. The actual row is only saved after `log` below
+        # gets an id (_save_personal_best needs it as source_log_id).
+        extraordinary = (
+            implausible and row.prescription_type in ("distance", "duration")
+            and _personal_best_qualifies(session, user_id, activity_type, total)
+        )
 
     if client_entry_id:
         existing = session.scalar(
@@ -728,12 +1059,110 @@ def log_activity(session: Session, user_id: str, *, activity_type: str | None = 
         custom_exercise_id=custom_exercise_id,
         sets_done=sets, amount_per_set=amount, unit=unit, total_volume=total,
         local_date=today_ist(), source=source, implausible=implausible,
+        extraordinary=extraordinary,
         client_entry_id=client_entry_id,
+        workout_session_id=workout_session.id if workout_session else None,
+        set_amounts=set_amounts,
     )
-    session.add(log)
-    session.flush()
+    if client_entry_id:
+        # The existence check above is TOCTOU: two concurrent offline-replay
+        # requests carrying the same client_entry_id (exactly the flaky-
+        # mobile-network case this field exists for) can both pass it, then
+        # both try to insert, and the second one used to surface as an
+        # uncaught IntegrityError -> 500 instead of the intended
+        # `duplicate: true`. A SAVEPOINT scopes the failure to just this
+        # insert — a batch call logs several entries in one transaction, and
+        # this must not roll back the ones that already succeeded.
+        try:
+            with session.begin_nested():
+                session.add(log)
+                if workout_session:
+                    workout_session.completed_activity_count += 1
+                session.flush()
+        except IntegrityError:
+            existing = session.scalar(
+                select(ActivityLog).where(
+                    ActivityLog.user_id == user_id,
+                    ActivityLog.client_entry_id == client_entry_id)
+            )
+            if existing is None:
+                raise  # a different constraint failed — not the dedupe race
+            # A genuine replay, not a fresh log — the session's count was
+            # never meant to count this twice.
+            return {"id": existing.id, "duplicate": True,
+                    "implausible": existing.implausible,
+                    "total_volume": float(existing.total_volume)}
+    else:
+        session.add(log)
+        if workout_session:
+            workout_session.completed_activity_count += 1
+        session.flush()
+    if extraordinary:
+        _save_personal_best(session, user_id, row_activity_type, total, unit, log.id)
     return {"id": log.id, "duplicate": False, "implausible": implausible,
+            "extraordinary": extraordinary,
             "total_volume": total, "prescription": prescription}
+
+
+# --- Workout sessions (guided player) ---------------------------------------
+
+def _get_active_workout_session(session: Session, user_id: str,
+                                workout_session_id: str) -> WorkoutSession:
+    row = session.get(WorkoutSession, workout_session_id)
+    if row is None or row.user_id != user_id:
+        raise NotFound(f"Unknown workout session: {workout_session_id}")
+    if row.status != "active":
+        raise Conflict("This workout session has already ended.")
+    return row
+
+
+def start_workout_session(session: Session, user_id: str,
+                          activity_types: list[str]) -> dict:
+    """Starts a guided Workout Player session. `activity_types` is exactly
+    the list the player is about to show (taken from a /v1/suggestions call
+    moments earlier) — planned_activity_count is a snapshot of that, frozen
+    at start time, not recomputed later.
+
+    Self-healing: any session this user already has marked 'active' gets
+    closed out as 'abandoned' first. There is no age check here — starting a
+    new session always supersedes whatever was active before, however old it
+    was. A user who simply never comes back at all (no new session ever
+    started) is instead caught by the periodic reaper,
+    scripts/close_stale_workout_sessions.py.
+    """
+    session.execute(
+        update(WorkoutSession)
+        .where(WorkoutSession.user_id == user_id, WorkoutSession.status == "active")
+        .values(status="abandoned", ended_at=datetime.now(timezone.utc))
+    )
+    row = WorkoutSession(
+        user_id=user_id,
+        started_at=datetime.now(timezone.utc),
+        planned_activity_count=len(activity_types),
+    )
+    session.add(row)
+    session.flush()
+    return {
+        "id": row.id,
+        "started_at": row.started_at.isoformat(),
+        "planned_activity_count": row.planned_activity_count,
+    }
+
+
+def finish_workout_session(session: Session, user_id: str, workout_session_id: str) -> dict:
+    """Ends a session and returns its real, server-computed duration — never
+    the client's own stopwatch, which can drift or freeze if the tab is
+    backgrounded."""
+    row = _get_active_workout_session(session, user_id, workout_session_id)
+    row.status = "completed"
+    row.ended_at = datetime.now(timezone.utc)
+    session.flush()
+    duration = (row.ended_at - row.started_at).total_seconds()
+    return {
+        "duration_seconds": round(duration),
+        "planned_activity_count": row.planned_activity_count,
+        "completed_activity_count": row.completed_activity_count,
+    }
 
 
 # --- Custom exercises (4.4) --------------------------------------------------
@@ -772,6 +1201,20 @@ def list_custom_exercises(session: Session, user_id: str) -> list[dict]:
     return [_custom_exercise_out(r, completed_today=r.id in done_today) for r in rows]
 
 
+def _reject_unsafe_name(name: str) -> None:
+    """Server-side backstop for a name that reaches every client verbatim
+    (the list card, the dashboard card, and — worse — this exact string
+    reflected into several of this module's own error messages, which a
+    client is likely to render less carefully than a normal list item).
+    Today's frontend escapes correctly, but that means the ONLY thing
+    stopping a stored-XSS name from executing is every future render path
+    remembering to escape it too — the same class of bug this codebase
+    already had to fix once (custom exercise list, see git history). Reject
+    at the source instead of trusting every consumer forever."""
+    if "<" in name or ">" in name:
+        raise ValidationError("Name cannot contain '<' or '>'.")
+
+
 def _reject_if_matches_taxonomy(session: Session, normalized: str, label: str) -> None:
     """Dedup against the official taxonomy (4.4) — "jogging" must resolve to
     the real `run` activity, never spawn a personal duplicate of it. Shared by
@@ -791,6 +1234,7 @@ def create_custom_exercise(session: Session, user_id: str, *, name: str,
         raise ValidationError("Name is required.")
     if len(name) > 64:
         raise ValidationError("Name must be 64 characters or fewer.")
+    _reject_unsafe_name(name)
     # De-dup while keeping the order the user picked them in.
     measurement_types = list(dict.fromkeys(measurement_types or []))
     if not measurement_types:
@@ -840,6 +1284,7 @@ def rename_custom_exercise(session: Session, user_id: str, exercise_id: str,
         raise ValidationError("Name is required.")
     if len(new_name) > 64:
         raise ValidationError("Name must be 64 characters or fewer.")
+    _reject_unsafe_name(new_name)
     normalized = _normalise_exercise_name(new_name)
     _reject_if_matches_taxonomy(session, normalized, new_name)
 
@@ -913,7 +1358,11 @@ def streak(session: Session, user_id: str) -> dict:
             # in this file (trend, activity_log_detail) already excludes
             # flagged-implausible logs; this one didn't, letting a single
             # garbage entry extend or preserve a streak it shouldn't.
-            ActivityLog.implausible.is_(False),
+            # An `extraordinary` log is still `implausible` (likely a genuine
+            # personal-best effort, not a typo/glitch — see PersonalBest) and
+            # DOES count as a real active day, unlike an ordinary implausible
+            # one.
+            or_(ActivityLog.implausible.is_(False), ActivityLog.extraordinary.is_(True)),
         )
         .group_by(ActivityLog.local_date).order_by(ActivityLog.local_date.desc())
     ).all()
@@ -1115,11 +1564,20 @@ def suggestions_today(session: Session, user_id: str, limit: int = 3) -> dict:
     # Latest log per activity today, not just "did it happen": a log from
     # before this program entry's most recent add/re-add (see add_program_entry)
     # must not count as completing today's fresh instance of it.
+    #
+    # Found live (code audit): this query didn't exclude flagged-implausible
+    # logs, unlike every sibling aggregation in this file (streak, trend,
+    # activity_log_detail) — a single garbage entry (e.g. a 9000km walk) could
+    # mark today's goal "completed" while streak() correctly ignored the same
+    # log and reported 0, contradicting itself in the same API response.
+    # Mirrors streak()'s own exception: an `extraordinary` log still counts as
+    # completing today's goal, same reasoning as there.
     last_logged = dict(session.execute(
         select(ActivityLog.activity_type, func.max(ActivityLog.logged_at)).where(
             ActivityLog.user_id == user_id,
             ActivityLog.local_date == today_ist(),
-            ActivityLog.activity_type.is_not(None))
+            ActivityLog.activity_type.is_not(None),
+            or_(ActivityLog.implausible.is_(False), ActivityLog.extraordinary.is_(True)))
         .group_by(ActivityLog.activity_type)
     ).all())
     added_at_by_type = dict(session.execute(
@@ -1146,25 +1604,42 @@ def suggestions_today(session: Session, user_id: str, limit: int = 3) -> dict:
         completed = (logged_at is not None and added_at is not None
                      and logged_at >= added_at)
         items.append({**p, "completed": completed,
-                      "video_url": v.watch_url if v else None,
+                      # `or None`: every uncurated row is seeded with
+                      # watch_url="" (the column is NOT NULL, see
+                      # catalog/loader.py's seed_videos), and no video has
+                      # been curated yet — so this returned "" for every
+                      # card, against the documented "string or null"
+                      # contract. A client checking `video_url !== null`
+                      # rendered a dead play button on every exercise.
+                      # video_library() already normalises this the same way.
+                      "video_url": (v.watch_url or None) if v else None,
                       "tier": tier_of(p["activity_type"])})
 
     excluded_count = len(_blocked_activities(session, user_id))
     tier_note = (f"{excluded_count} exercise(s) left out based on your health conditions"
                  if excluded_count else None)
 
-    # Surface what is still outstanding first; within that, most essential first
-    # rather than alphabetical — the same priority_order the tier slice uses.
-    items.sort(key=lambda i: (i["completed"], i["priority_order"]))
+    # Surface what is still outstanding first; within that, most useful to
+    # THIS user's own conditions first — the same usefulness_rank the tier
+    # slice uses, not a flat generic order.
+    items.sort(key=lambda i: (i["completed"], i["usefulness_rank"], i["priority_order"]))
     return {"referred": False, "message": None, "items": items[:limit],
             "all_items": items, "tier": band, "tier_note": tier_note}
+
+
+# Product decision: walking and running need no demonstration video — unlike
+# the rehab/mobility moves here, everyone already knows how to do them, and
+# every row in this catalogue is an uncurated placeholder today anyway
+# (see data/README.md), so showing a real-looking "Walking — demonstration"
+# card for these two is actively misleading rather than just unfinished.
+NO_VIDEO_NEEDED = {"walk", "running"}
 
 
 def video_library(session: Session, user_id: str) -> dict:
     if is_referred(session, user_id):
         # 6.3 — the referral gate applies on every exercise-content path.
         return {"referred": True, "message": REFERRAL_MESSAGE, "videos": []}
-    blocked = _blocked_activities(session, user_id)
+    blocked = set(_blocked_activities(session, user_id)) | NO_VIDEO_NEEDED
     rows = session.execute(
         select(VideoCatalog, ActivityTaxonomy)
         .join(ActivityTaxonomy,

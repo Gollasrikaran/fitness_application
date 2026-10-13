@@ -11,8 +11,9 @@ from sqlalchemy import select
 
 from app.platform.db import session_scope
 from app.profile import service as profile_service
-from app.profile.models import UserProgram
+from app.profile.models import ActivityLog, UserProgram
 from app.profile.service import today_ist
+from app.progression.service import MIN_LOGGED_DAYS_FOR_GROWTH
 from app.progression.models import ProgressionHistory
 from app.progression.service import DEFAULT_CURVE_K, compute_curve_increase
 
@@ -23,6 +24,20 @@ def _backdate_entry(session, user_id, weeks, activity_type=ACTIVITY):
     entry = session.get(UserProgram, (user_id, activity_type))
     entry.added_at = datetime.now(timezone.utc) - timedelta(days=weeks * 7 + 1)
     session.flush()
+
+
+def _seed_days(session, user_id, activity_type, *, sets, amount, unit, today, days):
+    """Direct ActivityLog inserts on `days` distinct dates — needed wherever a
+    test wants real growth: a single log_activity() call only ever produces
+    one day, which MIN_LOGGED_DAYS_FOR_GROWTH now correctly holds rather than
+    growing (see test_progression_min_frequency.py)."""
+    from datetime import timedelta
+    for i in range(days):
+        session.add(ActivityLog(
+            user_id=user_id, activity_type=activity_type, sets_done=sets,
+            amount_per_set=amount, unit=unit, total_volume=sets * amount,
+            local_date=today - timedelta(days=i),
+        ))
 
 
 def _row_for(rows, activity_type):
@@ -48,8 +63,11 @@ def test_high_adherence_increases_target_by_the_curve(make_user):
     user = make_user()
     with session_scope() as s:
         _backdate_entry(s, user["user_id"], weeks=1, activity_type=activity)
-        profile_service.log_activity(s, user["user_id"], activity_type=activity,
-                                      amount=1, sets=1)
+        # MIN_LOGGED_DAYS_FOR_GROWTH real days, not one log_activity() call —
+        # a single day's log is now correctly held, not grown (see
+        # test_progression_min_frequency.py).
+        _seed_days(s, user["user_id"], activity, sets=1, amount=1, unit="km",
+                   today=today_ist(), days=MIN_LOGGED_DAYS_FOR_GROWTH)
 
         rows = run_weekly_progression(s, user["user_id"], today=today_ist())
         row = _row_for(rows, activity)
@@ -113,6 +131,17 @@ def test_curve_increase_eventually_crosses_a_whole_step_via_internal_tracking(ma
     with session_scope() as s:
         profile_service.add_program_entry(s, user["user_id"], ACTIVITY)
         _backdate_entry(s, user["user_id"], weeks=1)
+        # This test's "10 weeks" are simulated via added_at alone — today_ist()
+        # never actually advances across iterations, so the adherence window
+        # is the same real window every time. Seed 2 extra historical days
+        # once, up front, so MIN_LOGGED_DAYS_FOR_GROWTH (3) is satisfied every
+        # iteration once the loop's own per-iteration log adds "today" as the
+        # 3rd distinct day — without this, every iteration would only ever
+        # have one real distinct date logged and permanently hold.
+        entry = s.get(UserProgram, (user["user_id"], ACTIVITY))
+        _seed_days(s, user["user_id"], ACTIVITY, sets=entry.target_sets,
+                   amount=float(entry.target_amount), unit=entry.unit,
+                   today=today_ist() - timedelta(days=1), days=2)
         crossed = False
         for _ in range(10):
             entry = s.get(UserProgram, (user["user_id"], ACTIVITY))

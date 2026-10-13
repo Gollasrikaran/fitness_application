@@ -18,7 +18,9 @@ from pathlib import Path
 
 from sqlalchemy import delete, select
 
-from app.catalog.models import ActivityTaxonomy, Condition, SafetyGridCell, VideoCatalog
+from app.catalog.models import (
+    ActivityTaxonomy, Condition, ConditionInteractionCell, SafetyGridCell, VideoCatalog,
+)
 from app.platform.config import load_config
 from app.platform.db import init_engine, session_scope
 
@@ -140,6 +142,7 @@ def load_safety_grid(session) -> int:
     # Nothing holds a foreign key into the grid, so a clean replace is safe
     # and is what makes a re-review land in full.
     session.execute(delete(SafetyGridCell))
+    ranks_by_condition: dict[str, list[int]] = {}
     for r in rows:
         verdict = r["verdict"].strip()
         if not verdict:
@@ -148,14 +151,49 @@ def load_safety_grid(session) -> int:
                 f"{r['condition_code']} x {r['activity_type']}. A blank is not "
                 "'probably safe' — fill it or the condition cannot be supported."
             )
+        condition_code = r["condition_code"].strip()
+        rank_raw = (r.get("usefulness_rank") or "").strip()
+        if verdict == "avoid":
+            if rank_raw:
+                raise CoverageError(
+                    f"safety_grid.csv has a usefulness_rank for "
+                    f"{condition_code} x {r['activity_type']}, but its verdict is "
+                    "'avoid' — a banned activity cannot also be ranked. Clear the rank."
+                )
+            usefulness_rank = None
+        else:
+            if not rank_raw:
+                raise CoverageError(
+                    f"safety_grid.csv is missing a usefulness_rank for "
+                    f"{condition_code} x {r['activity_type']} (verdict={verdict}). "
+                    "Every activity a user can actually be shown needs a rank, or "
+                    "personalized ordering silently falls back for this cell."
+                )
+            usefulness_rank = int(rank_raw)
+            ranks_by_condition.setdefault(condition_code, []).append(usefulness_rank)
         session.add(SafetyGridCell(
-            condition_code=r["condition_code"].strip(),
+            condition_code=condition_code,
             activity_type=r["activity_type"].strip(),
             verdict=verdict,
             note=(r.get("note") or "").strip() or None,
+            usefulness_rank=usefulness_rank,
             reviewer=r["reviewer"].strip(),
             reviewed_at=_date_or_none(r.get("reviewed_at", "")),
         ))
+
+    # Each condition's ranks must be a clean 1..N permutation (no ties, no
+    # gaps) — a tie makes "most useful" ambiguous, and a gap means a rank was
+    # typo'd (e.g. two rows both marked 5), silently producing a shorter
+    # effective ordering than the activity count implies.
+    for condition_code, ranks in ranks_by_condition.items():
+        expected = list(range(1, len(ranks) + 1))
+        if sorted(ranks) != expected:
+            raise CoverageError(
+                f"usefulness_rank for condition '{condition_code}' is not a clean "
+                f"1..{len(ranks)} ordering (got {sorted(ranks)}) — check for a "
+                "duplicate or skipped rank."
+            )
+
     session.flush()
     return len(rows)
 
@@ -181,6 +219,82 @@ def assert_full_coverage(session) -> None:
             f"{' …' if len(missing) > 8 else ''}. "
             "Suggestions would fail open for these conditions."
         )
+
+
+def load_condition_interactions(session) -> int:
+    """Combined-conditions safety check (MULTI_CONDITION_INTERACTION_SAFETY_PLAN.md).
+
+    Deliberately NOT subject to assert_full_coverage — this table only ever
+    ESCALATES a verdict on top of the single-condition grid (which IS fully
+    covered and fail-closed on its own), so a missing pair+activity row just
+    means "no extra risk currently known," never "assumed safe."
+    """
+    path = DATA / "condition_interactions.csv"
+    rows = list(csv.DictReader(path.open(encoding="utf-8"))) if path.exists() else []
+    session.execute(delete(ConditionInteractionCell))
+
+    supported = set(session.scalars(
+        select(Condition.condition_code)
+        .where(Condition.bucket == "supported", Condition.condition_code != "none")
+    ).all())
+    activities = set(session.scalars(select(ActivityTaxonomy.activity_type)).all())
+
+    seen: set[tuple[str, str, str]] = set()
+    for r in rows:
+        a = r["condition_a"].strip()
+        b = r["condition_b"].strip()
+        activity_type = r["activity_type"].strip()
+        verdict = r["verdict"].strip()
+
+        if a == b:
+            raise CoverageError(
+                f"condition_interactions.csv: {a!r} paired with itself for "
+                f"{activity_type!r} — an interaction needs two DIFFERENT conditions."
+            )
+        for code in (a, b):
+            if code not in supported:
+                raise CoverageError(
+                    f"condition_interactions.csv: {code!r} ({a}+{b} x {activity_type}) "
+                    "is not a supported-bucket condition — a refer-bucket condition "
+                    "already blocks all content (13.3b), so pairing it here is meaningless."
+                )
+        if activity_type not in activities:
+            raise CoverageError(
+                f"condition_interactions.csv: unknown activity_type {activity_type!r} "
+                f"for pair {a}+{b}."
+            )
+        if verdict not in ("modify", "avoid"):
+            raise CoverageError(
+                f"condition_interactions.csv: verdict for {a}+{b} x {activity_type} "
+                f"must be 'modify' or 'avoid', got {verdict!r}. An interaction can only "
+                "escalate restriction — a 'safe' row means nothing, since a missing row "
+                "already means 'no extra restriction known'."
+            )
+
+        # Canonical order: the smaller code always stored as condition_a, so a
+        # lookup never has to check both orders and a reversed-order duplicate
+        # is a real conflict, not a silent second row.
+        cond_a, cond_b = sorted((a, b))
+        key = (cond_a, cond_b, activity_type)
+        if key in seen:
+            raise CoverageError(
+                f"condition_interactions.csv: duplicate row for {cond_a}+{cond_b} "
+                f"x {activity_type}."
+            )
+        seen.add(key)
+
+        session.add(ConditionInteractionCell(
+            condition_a=cond_a,
+            condition_b=cond_b,
+            activity_type=activity_type,
+            verdict=verdict,
+            note=(r.get("note") or "").strip() or None,
+            reviewer=r["reviewer"].strip(),
+            reviewed_at=_date_or_none(r.get("reviewed_at", "")),
+        ))
+
+    session.flush()
+    return len(rows)
 
 
 def seed_videos(session) -> int:
@@ -223,6 +337,7 @@ def main() -> int:
             t = load_taxonomy(s)
             g = load_safety_grid(s)
             assert_full_coverage(s)
+            i = load_condition_interactions(s)
             v = seed_videos(s)
     except CoverageError as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
@@ -231,6 +346,7 @@ def main() -> int:
     print(f"conditions   {c:4}")
     print(f"activities   {t:4}")
     print(f"grid cells   {g:4}  (coverage complete)")
+    print(f"interactions {i:4}  (sparse, escalation-only)")
     print(f"video links  {v:4}  (placeholder search links)")
     return 0
 

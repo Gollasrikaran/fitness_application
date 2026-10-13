@@ -5,13 +5,22 @@ from datetime import date, timedelta
 
 from flask import Blueprint, g, jsonify, request
 
-from app.gateway.middleware import require_auth, require_staff
+from app.gateway.middleware import enforce_public_read_rate_limits, require_auth, require_staff
 from app.platform.db import session_scope
 from app.platform.errors import ValidationError
 from app.profile import service
 from app.progression import service as progression_service
 
 bp = Blueprint("core", __name__, url_prefix="/v1")
+
+# Sized against wall-clock, not "what looks like a lot": the client_entry_id
+# path does a SELECT + savepointed INSERT + flush per entry, so each entry is
+# ~3 DB round trips. On this deployment the app and database are in different
+# regions (~350ms per round trip, measured), which makes even 50 entries a
+# ~50-second request holding one of only four worker threads. 15 keeps the
+# worst case near 15s while staying far above any real logging session (the
+# largest genuine case is one custom exercise with all 3 measurement types).
+MAX_ENTRIES_PER_REQUEST = 15
 
 
 def _body() -> dict:
@@ -54,6 +63,12 @@ def _float_field(d: dict, *keys: str, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         raise ValidationError(f"{keys[0]!r} must be a number.")
+    except OverflowError:
+        # Found live (code audit): float() on a huge JSON integer (10**400)
+        # raises OverflowError, which isn't in the tuple above — the same bug
+        # class already fixed in _int_field just below, missed here. It
+        # crashed as an uncaught 500 instead of a clean 422.
+        raise ValidationError(f"{keys[0]!r} is out of range.")
 
 
 def _int_field(d: dict, key: str, default: int) -> int:
@@ -97,15 +112,35 @@ def _list_field(d: dict, key: str) -> list[str]:
     return value
 
 
+def _optional_number_list_field(d: dict, key: str) -> list[float] | None:
+    """set_amounts: absent entirely (None) means "no per-set breakdown" and
+    must stay distinguishable from an empty list — log_activity rejects an
+    empty list outright but treats None as simply not using this feature, so
+    `d.get(key)` (not `or []`) preserves that distinction. Booleans are
+    technically `int` in Python and would silently pass an `isinstance(...,
+    (int, float))` check — rejected explicitly, same reasoning as the
+    existing numeric-field helpers in this file."""
+    if key not in d or d[key] is None:
+        return None
+    value = d[key]
+    if not isinstance(value, list):
+        raise ValidationError(f"{key!r} must be a list of numbers.")
+    if not all(isinstance(item, (int, float)) and not isinstance(item, bool) for item in value):
+        raise ValidationError(f"{key!r} must be a list of numbers.")
+    return [float(v) for v in value]
+
+
 @bp.get("/conditions")
 def conditions():
     """Public: the client needs this to render onboarding before a profile exists."""
+    enforce_public_read_rate_limits()
     with session_scope() as s:
         return jsonify({"conditions": service.list_conditions(s)})
 
 
 @bp.get("/taxonomy/activities")
 def activities():
+    enforce_public_read_rate_limits()
     with session_scope() as s:
         return jsonify({"activities": service.list_activities(s)})
 
@@ -204,22 +239,61 @@ def log():
     # clean 422.
     if not isinstance(entries, list):
         raise ValidationError("'entries' must be a list.")
+    # Found live (code audit): unbounded — the only real ceiling was the 1MiB
+    # body limit (~20,000 tiny entries), each doing its own SELECT+INSERT+
+    # flush inside one transaction. No legitimate single logging session logs
+    # more than a handful of exercises at once (a custom exercise with all 3
+    # measurement types is the largest real case).
+    if len(entries) > MAX_ENTRIES_PER_REQUEST:
+        raise ValidationError(f"Cannot log more than {MAX_ENTRIES_PER_REQUEST} entries at once.")
     out = []
     with session_scope() as s:
         for e in entries:
             if not isinstance(e, dict):
                 raise ValidationError("Each activity entry must be a JSON object.")
+            activity_type = _optional_str_field(e, "activity_type")
+            set_amounts = _optional_number_list_field(e, "set_amounts")
             out.append(service.log_activity(
                 s, g.user_id,
-                activity_type=_optional_str_field(e, "activity_type"),
+                activity_type=activity_type,
                 custom_exercise_id=_optional_str_field(e, "custom_exercise_id"),
                 amount=_float_field(e, "amount", "quantity"),
                 sets=_int_field(e, "sets", 1),
                 unit=_optional_str_field(e, "unit"),
                 source=_str_field(e, "source", "manual"),
                 client_entry_id=_optional_str_field(e, "client_entry_id"),
+                workout_session_id=_optional_str_field(e, "workout_session_id"),
+                set_amounts=set_amounts,
             ))
+            # First real per-set log for this activity switches it from the
+            # single-blended-target system to per-set independent tracking
+            # (PER_SET_PROGRESSION_PLAN.md) — no-op if already started, or if
+            # this isn't a reps-type activity. Deliberately after a
+            # successful log_activity call, never before — a validation
+            # failure on the log itself must not silently start tracking.
+            if activity_type and set_amounts is not None:
+                progression_service.start_per_set_tracking_if_needed(s, g.user_id, activity_type)
         return jsonify({"logged": out, "streak": service.streak(s, g.user_id)}), 201
+
+
+@bp.post("/workout-sessions")
+@require_auth
+def start_workout_session():
+    """Starts a guided Workout Player session. `activity_types` should be
+    exactly what the player is about to show (from a prior /v1/suggestions
+    call) — see service.start_workout_session for why that matters."""
+    d = _body()
+    with session_scope() as s:
+        result = service.start_workout_session(
+            s, g.user_id, _list_field(d, "activity_types"))
+        return jsonify(result), 201
+
+
+@bp.post("/workout-sessions/<workout_session_id>/finish")
+@require_auth
+def finish_workout_session(workout_session_id: str):
+    with session_scope() as s:
+        return jsonify(service.finish_workout_session(s, g.user_id, workout_session_id))
 
 
 @bp.get("/custom-exercises")
@@ -325,6 +399,17 @@ def dashboard():
             "progression": progression_service.progression_series(s, g.user_id),
             "signup_date": service.signup_date(s, g.user_id).isoformat(),
         })
+
+
+@bp.get("/personal-bests")
+@require_auth
+def personal_bests():
+    """Shown after the Workout Player when a just-logged distance/duration
+    effort (walk, run, cycle, swim) earns a spot in the user's own top 5 for
+    that activity (see log_activity's `extraordinary` flag) — purely a
+    celebratory display list, never consulted by streak/progression math."""
+    with session_scope() as s:
+        return jsonify({"activities": service.list_personal_bests(s, g.user_id)})
 
 
 @bp.get("/videos")

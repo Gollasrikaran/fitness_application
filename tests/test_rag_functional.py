@@ -56,11 +56,18 @@ def test_condition_disambiguation_round_trip(make_user, client):
     question in the same round trip.
 
     Quota accounting (found live, code audit; fixed as an explicit product
-    decision): every real message now costs one slot unconditionally,
-    including the first classify-only message — not just once a real answer
-    comes out. So this round trip costs 2 total: 1 for the message that
-    triggered condition suggestion, 1 more for the follow-up message that
-    confirms the condition and gets an actual answer.
+    decision — see app/rag/service.py:1694-1719): every real message costs
+    one slot unconditionally, including the first classify-only message — but
+    the confirmation that follows redeems a short-lived "already paid"
+    marker instead of charging a SECOND slot, specifically so a single
+    symptom-sounding question doesn't cost 2 of the user's 5 daily slots just
+    for being asked "which condition?" and then answered. So this whole round
+    trip costs 1 total, not 2: the classify turn below pays it, and the
+    confirmation turn redeems the same charge rather than paying again.
+
+    (A stale version of this test once asserted 2 here, back when
+    confirmation charged its own slot — that design was deliberately
+    replaced; this test was just never updated to match.)
 
     Note: this depends on the free classifier model matching "wrist hurts and
     tingles" to carpal_tunnel. It's not perfectly deterministic even at
@@ -90,7 +97,7 @@ def test_condition_disambiguation_round_trip(make_user, client):
     d2 = r2.get_json()
     assert d2["needs_condition_selection"] is False
     assert d2["answer"] is not None
-    assert d2["quota"]["used"] == 2
+    assert d2["quota"]["used"] == 1
 
     profile = client.get("/v1/profile", headers=user["headers"]).get_json()
     codes = {c["code"] for c in profile["conditions"]}

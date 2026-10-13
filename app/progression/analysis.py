@@ -42,7 +42,17 @@ from app.rag.vectorstore import ResponseTruncated, UpstreamUnavailable
 # max_tokens budget on a short structured reply can burn out on reasoning
 # before ever emitting the answer). They are siblings, not one a subclass of
 # the other, so catching only UpstreamUnavailable here left this uncaught.
-_CHAT_FAILURE_EXCEPTIONS = (UpstreamUnavailable, ResponseTruncated)
+#
+# Widened to RuntimeError (their shared base) for the same reason app/rag/
+# service.py was: chat_complete also raises a BARE RuntimeError for any
+# non-retryable HTTP status — 402 when the OpenRouter account runs out of
+# credit, 400, or 404 for a retired model slug, all of which vectorstore.py
+# documents as things that have actually happened. Those escaped this tuple
+# entirely, and on the escalation-confirmation path there is no handler
+# further up: the user got a bare 500 AFTER their escalation slot had already
+# been consumed and committed. Failing closed here turns that into the
+# intended "no escalation proposed" outcome.
+_CHAT_FAILURE_EXCEPTIONS = (RuntimeError,)
 
 MAX_DEPTH = 2
 MAX_SUBCHECKS = 6
