@@ -50,7 +50,23 @@ def _device_id() -> str:
     against a legitimate client's own bug (e.g. regenerating an id on every
     launch), not a hard guarantee against a deliberate attacker.
     """
-    return request.headers.get("X-Device-Id", "").strip() or "unknown-device"
+    header = request.headers.get("X-Device-Id", "").strip()
+    if header:
+        return header
+    # Found live (code audit): falling back to one shared literal string here
+    # meant EVERY caller that omits this header — across signup, login,
+    # verify-email, both password-reset routes, everything gated by
+    # enforce_preauth_rate_limits() — collapsed into a single rate-limit
+    # bucket at rl_device_per_hour (default 60/hour). 60 requests from any
+    # one anonymous source, anywhere, could exhaust password-reset and
+    # email-verification for the entire app at once. Keying the fallback on
+    # the caller's own IP instead means unrelated anonymous callers no longer
+    # share a bucket with each other. This is not a security fix by itself —
+    # this function's own docstring already covers why device-id can't be
+    # trusted against a deliberate attacker — it only closes the specific
+    # "one bucket for the whole world" failure mode. rl_ip_per_hour remains
+    # the real backstop either way.
+    return f"no-device:{_client_ip()}"
 
 
 def _incr_window(key: str, limit: int, window_seconds: int) -> None:
@@ -74,6 +90,23 @@ def enforce_preauth_rate_limits() -> None:
     cfg = current_app.config["APP_CONFIG"]
     _incr_window(rc.key_rl_device(_device_id()), cfg.rl_device_per_hour, 3600)
     _incr_window(rc.key_rl_ip(_client_ip()), cfg.rl_ip_per_hour, 3600)
+
+
+def enforce_public_read_rate_limits() -> None:
+    """Found live (code audit): /v1/conditions and /v1/taxonomy/activities are
+    public (no auth, reachable before signup/login) and had NO rate limit at
+    all — completely unthrottled scraping/flooding.
+
+    Deliberately NOT reusing enforce_preauth_rate_limits()/its Redis keys:
+    that would share one bucket between these harmless reference-data reads
+    and signup/login/password-reset, so a device merely loading the
+    onboarding screen a few times could eat into the budget that's supposed
+    to protect signup/login — a self-inflicted lockout, not a security fix.
+    Separate "ref:" keys keep this an independent budget.
+    """
+    cfg = current_app.config["APP_CONFIG"]
+    _incr_window(f"rl:device:ref:{_device_id()}", cfg.rl_device_per_hour, 3600)
+    _incr_window(f"rl:ip:ref:{_client_ip()}", cfg.rl_ip_per_hour, 3600)
 
 
 def enforce_user_rate_limit(user_id: str) -> None:

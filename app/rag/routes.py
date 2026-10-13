@@ -97,9 +97,19 @@ def query():
             or not all(isinstance(a, str) for a in activity_types)
         ):
             raise ValidationError("revert_confirmation.activity_types must be a list of strings.")
+    question = d.get("question")
+    if question is None:
+        question = ""
+    if not isinstance(question, str):
+        # Found live (code audit): `d.get("question") or ""` passes a truthy
+        # NON-string straight through (a JSON number, list or object), and
+        # answer_query's `(question or "").strip()` then raises
+        # AttributeError — an uncaught 500. This file already guards the
+        # confirmation sub-fields this way; the main field was missed.
+        raise ValidationError("'question' must be a string.")
     with session_scope() as s:
         return jsonify(service.answer_query(
-            s, g.user_id, d.get("question") or "",
+            s, g.user_id, question,
             rag_db_url=cfg.rag_database_url,
             openrouter_api_key=cfg.openrouter_api_key,
             condition_confirmation=confirmation,

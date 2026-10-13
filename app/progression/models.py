@@ -40,12 +40,22 @@ class ProgressionHistory(Base):
     curve_pct: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False)
     reason: Mapped[str] = mapped_column(String(32), nullable=False)
 
+    # Per-set independent progression (PER_SET_PROGRESSION_PLAN.md): NULL for
+    # every row written by the old exercise-level system (unchanged, still
+    # the default) — populated (1-based) for a row that describes one
+    # specific set's own change. Lets the "boost Set 4" rule (set_number=3
+    # hits ceiling -> look up set_number=4's own most recent growth %) query
+    # one set's history directly instead of guessing from the exercise-level
+    # row, which never had per-set resolution at all.
+    set_number: Mapped[int | None] = mapped_column(Integer)
+
     applied_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
-            "reason IN ('curve','hold','reduce','floor','escalation','double_progression')",
+            "reason IN ('curve','hold','reduce','floor','escalation','double_progression',"
+            "'set_created','set_boost','pro_level')",
             name="ph_reason_known"),
         Index("ix_progression_history_user_activity", "user_id", "activity_type"),
     )

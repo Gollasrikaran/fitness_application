@@ -37,6 +37,15 @@ def _device_id() -> str:
         # 1.4 depends on a stable device id; refusing early is clearer than
         # silently binding the session to "unknown-device".
         raise ValidationError("X-Device-Id header is required.")
+    # Found live: no maximum length was checked — this value is stored in a
+    # String(128) column (app/auth/models.py), so a header longer than that
+    # reached the INSERT and the database's own "value too long" error
+    # surfaced as an uncaught 500 instead of a clean 422. Same class of bug
+    # already fixed once for client_entry_id (app/profile/routes.py) and for
+    # email (app/auth/service.py.signup) — applying the same proactive
+    # length check here instead of letting the database reject it uncaught.
+    if len(device) > 128:
+        raise ValidationError("X-Device-Id header is too long.")
     return device
 
 

@@ -191,9 +191,70 @@ class SafetyGridCell(Base):
     reviewer: Mapped[str] = mapped_column(String(128), nullable=False)
     reviewed_at: Mapped[date | None] = mapped_column(Date)
 
+    # Personalized "most useful first" ordering (1 = most useful) for this one
+    # condition, distinct from `verdict` (safety). Only meaningful for a cell
+    # a user will ever actually be shown (`safe`/`modify`) — null for `avoid`,
+    # since a banned activity is never ranked for anything. A user with
+    # several conditions gets the best (lowest) rank across all of them per
+    # activity — see app.profile.service._usefulness_ranks.
+    #
+    # "avoid implies null, shown implies present" is enforced in
+    # app.catalog.loader (load_safety_grid), the same way overall grid
+    # coverage is (assert_full_coverage) — not a DB CheckConstraint. The
+    # deploy sequence runs migrations before the loader (Procfile: `alembic
+    # upgrade head && python -m app.catalog.loader`), so a DB-level
+    # NOT-NULL-when-shown constraint would reject its own migration the
+    # moment this column was added, before the loader ever got a chance to
+    # populate real ranks — found by actually running this locally.
+    usefulness_rank: Mapped[int | None] = mapped_column(Integer)
+
     __table_args__ = (
         CheckConstraint("verdict IN ('safe','modify','avoid')", name="sg_verdict_known"),
         Index("ix_safety_grid_condition", "condition_code"),
+    )
+
+
+class ConditionInteractionCell(Base):
+    """One verdict per (condition pair) x activity — the combined-conditions
+    safety check from APP_FEATURES_OVERVIEW.md's "designed conceptually but
+    not yet built" gap. See MULTI_CONDITION_INTERACTION_SAFETY_PLAN.md.
+
+    Deliberately NOT full-coverage like SafetyGridCell: this table only ever
+    ESCALATES a verdict on top of the single-condition grid, which is still
+    the fail-closed baseline underneath it. A missing row means "no extra
+    risk known for this combination," never "assumed safe" — the grid's own
+    per-condition check still applies regardless. That's why `verdict` here
+    can never be 'safe': a 'safe' row would mean nothing (absence already
+    means no extra restriction) and is rejected at load time.
+
+    condition_a is always the lexically-smaller code (enforced by the
+    CheckConstraint below AND by the loader, which swaps a reversed CSV row
+    before insert) so a lookup only ever has to check sorted(pair), never
+    both orders, and a reversed-order duplicate is a real constraint
+    violation instead of a silent second row.
+    """
+    __tablename__ = "condition_interactions"
+
+    condition_a: Mapped[str] = mapped_column(
+        String(64), ForeignKey("conditions.condition_code", ondelete="CASCADE"),
+        primary_key=True)
+    condition_b: Mapped[str] = mapped_column(
+        String(64), ForeignKey("conditions.condition_code", ondelete="CASCADE"),
+        primary_key=True)
+    activity_type: Mapped[str] = mapped_column(
+        String(64), ForeignKey("activity_taxonomy.activity_type", ondelete="CASCADE"),
+        primary_key=True)
+
+    verdict: Mapped[str] = mapped_column(String(16), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    reviewer: Mapped[str] = mapped_column(String(128), nullable=False)
+    reviewed_at: Mapped[date | None] = mapped_column(Date)
+
+    __table_args__ = (
+        CheckConstraint("verdict IN ('modify','avoid')", name="ci_verdict_known"),
+        CheckConstraint("condition_a < condition_b", name="ci_pair_canonical_order"),
+        Index("ix_condition_interactions_a", "condition_a"),
+        Index("ix_condition_interactions_b", "condition_b"),
     )
 
 

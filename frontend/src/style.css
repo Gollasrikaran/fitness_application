@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body{
+  background-color:#9dc2a4;color:#1a1c1e;-webkit-font-smoothing:antialiased;
+  -webkit-tap-highlight-color:transparent;display:flex;justify-content:center;
+}
+/* Shared across every mockup page (Dashboard.html, Pain Guidance.html, Exercise
+   workout Player.html all define this identically) — the one visual element
+   that's actually consistent across the whole mockup repo, unlike its card
+   colors which split into two different palettes depending on the page. */
+.mobile-frame{
+  width:100%;max-width:430px;min-height:100vh;position:relative;overflow-x:hidden;
+  transform:translateZ(0); /* containing block for position:fixed children, so
+    nav/toasts/FABs stay inside this column instead of spanning the full
+    browser width on a wide desktop viewport */
+  background:
+    radial-gradient(ellipse 70% 40% at 85% 0%, rgba(212,255,51,0.14) 0%, transparent 60%),
+    linear-gradient(160deg, #cbe3d0 0%, #b3d4ba 55%, #9dc2a4 100%);
+  box-shadow:0 0 0 1px rgba(0,0,0,0.06), 0 20px 40px -10px rgba(0,0,0,0.12);
+}
+.ambient-shadow{box-shadow:0 4px 20px rgba(0,0,0,.05)}
+/* Matches Exercise workout Player.html's own .frosted-glass-card exactly. */
+.frosted-glass-card{
+  background:rgba(255,255,255,0.72);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border:1px solid rgba(255,255,255,0.85);box-shadow:0 8px 30px -6px rgba(0,0,0,0.08);
+}
+/* Matches Exercise workout Player.html's own exercise-video-card exactly —
+   the dark demo-video placeholder shown above the Current Exercise card. */
+.exercise-video-card{
+  width:100%;border-radius:22px;overflow:hidden;background:rgba(255,255,255,0.68);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border:1px solid rgba(255,255,255,0.85);box-shadow:0 8px 28px -6px rgba(0,0,0,0.10);
+  flex-shrink:0;
+}
+.exercise-video-card .video-ratio{position:relative;width:100%;background:#0f1005}
+.exercise-video-card .video-footer{display:flex;align-items:center;justify-content:space-between;padding:9px 14px}
+@keyframes vidPulse{0%,100%{opacity:1}50%{opacity:.5}}
+.live-dot{animation:vidPulse 1.6s ease-in-out infinite}
+.screen{display:none}.screen.on{display:block}
+.assistant-pulse{animation:pulse 2s infinite cubic-bezier(.4,0,.6,1)}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.7;transform:scale(1.05)}}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:120px;z-index:60;
+       padding:12px 20px;border-radius:999px;font-family:"Plus Jakarta Sans";font-size:14px;
+       font-weight:700;box-shadow:0 8px 24px rgba(0,0,0,.14);opacity:0;pointer-events:none;
+       transition:opacity .2s ease}
+.toast.show{opacity:1}
+/* Chat message bubbles scrollIntoView({block:"end"}) to their own bottom
+   edge, which ignores #c-thread's trailing padding-bottom entirely — that
+   padding only affects how far you CAN scroll, not where scrollIntoView
+   stops. Without this, the newest message lands flush with the actual
+   viewport bottom, landing directly behind the fixed composer+nav bar
+   that visually overlay that same area. scroll-margin-bottom IS honored
+   by scrollIntoView, so it reserves the right amount of clearance instead.
+   ~70px composer offset + composer's own height + the nav pill below it. */
+#c-thread > div{scroll-margin-bottom:210px}

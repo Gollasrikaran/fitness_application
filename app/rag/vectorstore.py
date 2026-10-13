@@ -20,6 +20,7 @@ import psycopg
 EMBEDDING_MODEL = "openai/text-embedding-3-small"
 EMBEDDING_URL = "https://openrouter.ai/api/v1/embeddings"
 CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+VOICE_CHAT_MODEL = "openai/gpt-4o-mini" # Bypasses free queue for instant responses
 CHAT_MODEL = "openai/gpt-oss-20b"  # paid — OpenRouter discontinued the :free tier
 # for this exact model (confirmed live, 2026-08-24: the :free slug now 404s with
 # "use this slug instead: openai/gpt-oss-20b"). Deliberately the SAME model, not
@@ -31,6 +32,19 @@ CHAT_MODEL = "openai/gpt-oss-20b"  # paid — OpenRouter discontinued the :free 
 # At $0.03/$0.13 per 1M input/output tokens, this is one of the cheapest paid
 # models on OpenRouter regardless.
 TOP_K = 5
+
+# Moved here from app/rag/service.py (which still imports it as
+# vectorstore.RELEVANCE_THRESHOLD) so retrieve_chunks below can use the same
+# bar for its own-condition-first search, not just the off-topic check it was
+# originally measured for.
+#
+# Measured live: off-topic questions ("capital of France", "15 times 34",
+# "prime minister of India", "write me a poem") top out around 0.10-0.18
+# similarity; real on-topic questions, even vague ones ("is walking good for
+# me", "my joints hurt sometimes"), start around 0.38 and go up from there —
+# a wide, clean gap. 0.25 sits in the middle of that gap with real margin on
+# both sides.
+RELEVANCE_THRESHOLD = 0.25
 
 
 class UpstreamUnavailable(RuntimeError):
@@ -308,19 +322,7 @@ EXTENDED_TOPICS = [
 ]
 
 
-def retrieve_chunks(question: str, condition_codes: list[str], *, rag_db_url: str,
-                     api_key: str, top_k: int = TOP_K) -> list[dict]:
-    """Nearest chunks scoped to whichever of the user's selected conditions we have
-    RAG content for, plus the general WHO physical-activity content as a baseline
-    (5.2 — "the user's selected conditions", so this never searches conditions the
-    user didn't report for anything SAFETY-relevant), plus EXTENDED_TOPICS — backend-
-    only reference material that's always in scope regardless of the user's own
-    conditions (5.8). Still a single top-k ranked search: a genuinely relevant
-    chunk about the user's own condition should still out-rank an unrelated
-    extended-topic chunk on similarity alone, same as it would today."""
-    vec_str = vector_literal(embed_text(question, api_key))
-    scoped_codes = list(dict.fromkeys([*condition_codes, "general", *EXTENDED_TOPICS]))
-
+def _search_chunks(vec_str: str, codes: list[str], rag_db_url: str, top_k: int) -> list[tuple]:
     try:
         with psycopg.connect(rag_db_url) as conn:
             with conn.cursor() as cur:
@@ -333,9 +335,9 @@ def retrieve_chunks(question: str, condition_codes: list[str], *, rag_db_url: st
                     order by embedding <=> %s::vector
                     limit %s;
                     """,
-                    (vec_str, scoped_codes, vec_str, top_k),
+                    (vec_str, codes, vec_str, top_k),
                 )
-                rows = cur.fetchall()
+                return cur.fetchall()
     except psycopg.OperationalError as e:
         # Found live (third-pass code audit): an unreachable/down vector DB
         # (Supabase outage, network blip) raised this uncaught — the user got
@@ -343,6 +345,39 @@ def retrieve_chunks(question: str, condition_codes: list[str], *, rag_db_url: st
         # OpenRouter outage already gets, even though it's equally not their
         # fault.
         raise UpstreamUnavailable(f"vector store unreachable: {e}") from e
+
+
+def retrieve_chunks(question: str, condition_codes: list[str], *, rag_db_url: str,
+                     api_key: str, top_k: int = TOP_K) -> list[dict]:
+    """Nearest chunks scoped to whichever of the user's selected conditions we have
+    RAG content for, plus the general WHO physical-activity content as a baseline
+    (5.2 — "the user's selected conditions", so this never searches conditions the
+    user didn't report for anything SAFETY-relevant), plus EXTENDED_TOPICS — backend-
+    only reference material that's always in scope regardless of the user's own
+    conditions (5.8).
+
+    Found live: a single flat search across the user's own condition(s) AND all
+    ~70 EXTENDED_TOPICS ranked everything by similarity alone, with no priority
+    for the user's own selected condition. A generically-worded question could
+    out-rank the user's own condition's genuinely relevant content with an
+    unrelated extended-topic chunk whose wording happened to match more closely
+    — e.g. a carpal_tunnel user asking "what helps wrist pain from typing" got
+    back golfer's elbow / ulnar tunnel syndrome chunks, nothing from
+    carpal_tunnel, even though 19 relevant carpal_tunnel chunks exist. Fixed
+    with a two-stage search: try the user's own condition(s) + general first,
+    and only widen to EXTENDED_TOPICS if that top match isn't even reliably
+    on-topic (same RELEVANCE_THRESHOLD bar app/rag/service.py already uses to
+    tell a genuine answer from an off-topic one) — same embedding, so this
+    never costs a second embedding call, only (occasionally) a second cheap
+    local query.
+    """
+    vec_str = vector_literal(embed_text(question, api_key))
+    own_codes = list(dict.fromkeys([*condition_codes, "general"]))
+
+    rows = _search_chunks(vec_str, own_codes, rag_db_url, top_k)
+    if not rows or float(rows[0][5]) < RELEVANCE_THRESHOLD:
+        all_codes = list(dict.fromkeys([*own_codes, *EXTENDED_TOPICS]))
+        rows = _search_chunks(vec_str, all_codes, rag_db_url, top_k)
 
     return [
         {"chunk_id": r[0], "source_note": r[1], "url": r[2], "text": r[3], "condition_code": r[4],
