@@ -103,6 +103,35 @@ class Config:
     timezone: str = "Asia/Kolkata"   # single market (3.3)
     min_age: int = 18                # 18+ only (Out of Scope 17)
 
+    # --- Service role (capacity isolation) ---------------------------------
+    # The chatbot (app/rag) makes several sequential calls to an external LLM
+    # provider, each individually slow (up to ~90s) and occasionally much
+    # slower — everything else in this app (auth, logging, dashboard) only
+    # ever talks to Postgres/Redis and finishes in well under a second. On a
+    # single deployable with a small, fixed number of worker threads, a
+    # handful of concurrent chat requests can occupy every thread at once,
+    # so an unrelated user trying to just log in or check their dashboard
+    # gets stuck waiting behind someone else's slow AI reply — in the worst
+    # case, one request slow enough to hit gunicorn's own timeout takes the
+    # whole process down with it, including every other in-flight request.
+    #
+    # "all" (default) is the current single-service deployment — nothing
+    # changes unless this is set. Deploying a SECOND instance of this exact
+    # same codebase with SERVICE_ROLE=chat (serving only app/rag) alongside
+    # the first with SERVICE_ROLE=web (serving everything else) gives the
+    # chatbot its own separate pool of worker threads, so no amount of chat
+    # traffic can ever block login/dashboard/logging again — see
+    # app/factory.py for where this actually gates blueprint registration.
+    service_role: str = "all"
+
+    # --- CORS ---------------------------------------------------------------
+    # The frontend is a separate deployable (Vercel) from this API (Railway),
+    # so browser requests are cross-origin by default and get silently blocked
+    # without this. Empty in production until a real frontend origin is set —
+    # fails closed (no cross-origin access) rather than defaulting to "allow
+    # everything", same reasoning as the rest of this file.
+    cors_origins: list[str] = field(default_factory=list)
+
     # --- Devconsole (found live, code audit) -------------------------------
     # factory.py's `if not cfg.is_production` gate is necessary but not
     # sufficient: "development" and "test" are both legitimate non-prod
@@ -152,6 +181,13 @@ def load_config() -> Config:
         redis_cache = _require("REDIS_CACHE_URL")
         jwt_current = _require("JWT_CURRENT_KID")
         jwt_secret = _require("JWT_KEY_CURRENT")
+        if len(jwt_secret) < 32:
+            # Found live (code audit): SECRET_KEY gets this exact floor two
+            # lines up, but this key — which signs every access/refresh
+            # token in the app — had no minimum at all. A short HMAC secret
+            # is brute-forceable offline from any single issued token, which
+            # is a full authentication bypass, not just a weak-secrets nit.
+            raise ConfigError("JWT_KEY_CURRENT must be at least 32 characters in production")
         # Not yet _require()'d — see the field comment above.
         rag_database_url = _optional("RAG_DATABASE_URL", "")
         openrouter_api_key = _optional("OPENROUTER_API_KEY", "")
@@ -195,8 +231,37 @@ def load_config() -> Config:
     keys = {jwt_current: jwt_secret}
     prev_kid = os.environ.get("JWT_PREVIOUS_KID", "").strip()
     prev_key = os.environ.get("JWT_KEY_PREVIOUS", "").strip()
+    # Validate BEFORE the `both present` test, not inside it. A half-configured
+    # rotation (one of the pair set, the other missing or typo'd) would
+    # otherwise be silently ignored — and silently ignoring the previous key is
+    # exactly the failure that invalidates every session still holding a token
+    # signed with it. Fail fast instead, like every other setting here.
+    if bool(prev_kid) != bool(prev_key):
+        raise ConfigError(
+            "JWT_PREVIOUS_KID and JWT_KEY_PREVIOUS must be set together "
+            "(key rotation needs both halves, or neither)."
+        )
     if prev_kid and prev_key:
+        # Same floor as JWT_KEY_CURRENT, for the same reason: decode_access_token
+        # accepts a token signed with EITHER configured kid, so a weak retired
+        # key is just as forgeable as a weak current one — the rotation
+        # mechanism would otherwise be a way to quietly reintroduce the exact
+        # weakness the current-key check exists to prevent.
+        if is_prod and len(prev_key) < 32:
+            raise ConfigError("JWT_KEY_PREVIOUS must be at least 32 characters in production")
+        if prev_kid == jwt_current:
+            # Otherwise this assignment silently overwrites the CURRENT key's
+            # secret with the retired one — every freshly issued token would
+            # then fail its own signature check.
+            raise ConfigError("JWT_PREVIOUS_KID must differ from JWT_CURRENT_KID")
         keys[prev_kid] = prev_key
+
+    service_role = _optional("SERVICE_ROLE", "all").strip().lower()
+    if service_role not in {"all", "web", "chat"}:
+        raise ConfigError(
+            f"SERVICE_ROLE={service_role!r} is not recognized "
+            "(expected one of: all, web, chat)."
+        )
 
     return Config(
         env=env,
@@ -214,8 +279,17 @@ def load_config() -> Config:
         jwt_current_kid=jwt_current,
         jwt_keys=keys,
         access_token_ttl=timedelta(minutes=_int("ACCESS_TOKEN_TTL_MINUTES", 30)),
-        refresh_token_ttl=timedelta(days=_int("REFRESH_TOKEN_TTL_DAYS", 30)),
-        refresh_absolute_cap=timedelta(days=_int("REFRESH_ABSOLUTE_CAP_DAYS", 180)),
+        # Product decision: a user should only ever see a login screen again
+        # by choosing to log out, never because time passed. The access
+        # token still expires every 30 min as before — the frontend already
+        # refreshes it silently and transparently (main.js's doRefreshToken)
+        # — only the REFRESH token's sliding window and absolute cap are
+        # extended here, from 30/180 days to effectively "as long as this
+        # app is likely to be used for" rather than infinite (an infinite
+        # value would mean a stolen refresh token from a lost device is
+        # valid forever too; a very long bound still bounds that).
+        refresh_token_ttl=timedelta(days=_int("REFRESH_TOKEN_TTL_DAYS", 3650)),
+        refresh_absolute_cap=timedelta(days=_int("REFRESH_ABSOLUTE_CAP_DAYS", 3650)),
         refresh_grace=timedelta(seconds=_int("REFRESH_GRACE_SECONDS", 30)),
         password_min_length=_int("PASSWORD_MIN_LENGTH", 10),
         breach_check_enabled=_optional("BREACH_CHECK_ENABLED", "true").lower() == "true",
@@ -226,4 +300,15 @@ def load_config() -> Config:
         rl_ip_per_hour=_int("RL_IP_PER_HOUR", 200),
         devconsole_user=_optional("DEVCONSOLE_USER", "admin"),
         devconsole_password=_optional("DEVCONSOLE_PASSWORD", ""),
+        cors_origins=_cors_origins(is_prod),
+        service_role=service_role,
     )
+
+
+def _cors_origins(is_prod: bool) -> list[str]:
+    # Dev gets a working default (the Vite dev server's own origin) so the
+    # local frontend just works with zero setup; production has no default —
+    # set CORS_ORIGINS explicitly once a real frontend URL exists.
+    default = "" if is_prod else "http://localhost:5173,http://127.0.0.1:5173"
+    raw = os.environ.get("CORS_ORIGINS", default)
+    return [o.strip() for o in raw.split(",") if o.strip()]

@@ -198,9 +198,22 @@ def test_redistribution_never_exceeds_the_hard_ceiling_even_for_an_extreme_avera
 
 
 def test_escalation_redistribution_never_exceeds_the_hard_ceiling_either(make_user):
-    """Same fix, same exploit, via the chat-confirmed escalation path."""
+    """Same fix, same exploit, via the chat-confirmed escalation path.
+
+    Found live (test audit): apply_escalation (unlike run_weekly_progression)
+    takes no `today` parameter — it always reads the real current date
+    internally (16.5: a chat-confirmed escalation happens "right now", there's
+    no legitimate case for backdating it). A hardcoded past `today` used only
+    for SEEDING the trailing week would silently drift out of
+    _reps_trailing_average's real 7-day window as real time passes, making
+    this test fail for a reason that has nothing to do with the code under
+    test. Using today_ist() keeps the seeded week aligned with whatever
+    "today" the function itself will actually use, regardless of when this
+    test runs."""
+    from app.profile.service import today_ist
+
     user = make_user()
-    today = date(2026, 8, 25)
+    today = today_ist()
     with session_scope() as s:
         entry = s.get(UserProgram, (user["user_id"], REPS_ACTIVITY))
         entry.target_sets = 2
@@ -262,9 +275,17 @@ def test_double_progression_via_escalation_path_matches_the_weekly_job(make_user
     """apply_escalation shares the same guard bounds as the weekly job
     (existing project principle) — confirm the ceiling-crossing bump fires
     there too, driven by the real trailing average, not just in
-    run_weekly_progression."""
+    run_weekly_progression.
+
+    today_ist() here, not a hardcoded past date — see the sibling test above
+    (test_escalation_redistribution_never_exceeds_the_hard_ceiling_either)
+    for why: apply_escalation always reads the real current date internally,
+    so the seeded week must track it instead of a fixed date that drifts out
+    of the real trailing window as time passes."""
+    from app.profile.service import today_ist
+
     user = make_user()
-    today = date(2026, 8, 25)
+    today = today_ist()
     with session_scope() as s:
         entry = s.get(UserProgram, (user["user_id"], REPS_ACTIVITY))
         entry.target_sets = 2

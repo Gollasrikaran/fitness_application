@@ -6,6 +6,7 @@ REQUIREMENTS → API Contract → Conventions:
 """
 from __future__ import annotations
 
+import redis.exceptions
 from flask import Flask, g, jsonify, request
 from werkzeug.exceptions import HTTPException
 
@@ -93,17 +94,35 @@ def register_error_handlers(app: Flask) -> None:
         # 10.1/10.2 — write it down somewhere durable, not just this log
         # line. Failure to record must never hide the real error response
         # from the client, so this is its own best-effort try/except.
-        try:
-            from app.platform.db import session_scope
-            from app.platform.models import record_issue
-            with session_scope() as session:
-                record_issue(
-                    session, issue_type="server_error", message=repr(exc),
-                    path=request.path, user_id=getattr(g, "user_id", None),
-                    request_id=getattr(g, "request_id", None),
-                )
-        except Exception:
-            app.logger.exception("Failed to record the above exception as an issue")
+        #
+        # Found live (code audit): a Redis outage means every single
+        # request that touches the rate limiter or token revocation check
+        # lands here — and each one used to also attempt a Postgres write.
+        # That turns one infrastructure blip into a write storm against the
+        # database at exactly the moment things are already degraded, and
+        # each row is identical noise ("Redis down") rather than a distinct
+        # bug worth its own issue record. Log-only for this one class.
+        # Deliberately the connectivity subset, NOT the RedisError base
+        # class: that base also covers ResponseError/DataError, which are
+        # genuine application bugs (a WRONGTYPE, a malformed command) and
+        # must keep landing in the issue log where someone will see them.
+        # Only "Redis is unreachable right now" is filtered out here.
+        if isinstance(exc, (redis.exceptions.ConnectionError,
+                            redis.exceptions.TimeoutError,
+                            redis.exceptions.BusyLoadingError)):
+            app.logger.error("Redis unavailable (not recorded as an AppIssue): %r", exc)
+        else:
+            try:
+                from app.platform.db import session_scope
+                from app.platform.models import record_issue
+                with session_scope() as session:
+                    record_issue(
+                        session, issue_type="server_error", message=repr(exc),
+                        path=request.path, user_id=getattr(g, "user_id", None),
+                        request_id=getattr(g, "request_id", None),
+                    )
+            except Exception:
+                app.logger.exception("Failed to record the above exception as an issue")
         # Never leak internals to a mobile client.
         return jsonify({
             "error": {"code": "internal_error", "message": "Something went wrong"}

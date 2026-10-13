@@ -13,6 +13,10 @@ __pycache__/
 
 # Logs
 *.log
+# The whole directory, not just *.log: the scheduled-job wrapper also drops
+# .tmp stderr files here, and the run log itself carries thousands of user
+# ids. None of it belongs in version control.
+logs/
 
 # OS / editor noise
 .DS_Store
@@ -20,12 +24,15 @@ Thumbs.db
 .vscode/
 .idea/
 
-
 # Virtual environments
 venv/
 .venv/
 env/
 .ENV/
+
+# Voice extraction benchmark — the real dataset and its results are local-only
+testing/voice_extraction_benchmark/dataset.json
+testing/voice_extraction_benchmark/results/
 
 # voice_eval: team voice recordings, their transcripts, and run output stay local
 voice_eval/recordings/

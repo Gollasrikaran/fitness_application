@@ -22,16 +22,16 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.catalog.models import ActivityTaxonomy, SafetyGridCell
-from app.platform.errors import NotFound
+from app.platform.errors import Conflict, NotFound
 from app.profile.models import ActivityLog, UserCondition, UserProgram
-from app.profile.service import today_ist
+from app.profile.service import IST, today_ist
 from app.progression.models import ProgressionHistory
 
 # Phase 7 observability: which guard fired, by how much it reduced a proposal —
@@ -69,6 +69,16 @@ ADHERENCE_CAP = 1.5
 # real formula to reuse yet. This is an explicit, documented flat default
 # standing in for it, not a silent guess.
 REDUCE_PCT = 0.10
+
+# Found live (planning audit): _window_adherence only ever averages over days
+# that were actually LOGGED — a single very strong day, with zero other
+# activity all week, averages to just that one day's (capped) ratio, which
+# comfortably clears the 80% grow threshold on its own. A user could get
+# pushed to grow having trained once in seven days. This gates "grow"
+# specifically: strong performance on too few days falls through to "hold"
+# (see run_weekly_progression) — never "reduce", since nothing about those
+# days was actually bad, there just weren't enough of them yet to prove it.
+MIN_LOGGED_DAYS_FOR_GROWTH = 3
 
 # Reps-only double-progression ceiling (product decision, not a taxonomy
 # revision): taxonomy.max_amount for reps-type activities (e.g. glute_bridge's
@@ -112,6 +122,37 @@ REPS_FAST_TRACK_K = 5 / math.log(6)
 # adding more (4 sets x 50 reps = 200/side is the true ceiling for a reps
 # activity) — a set-count guard, independent of the per-set REPS_HARD_CEILING.
 REPS_MAX_SETS = 4
+
+# --- Per-set independent progression (PER_SET_PROGRESSION_PLAN.md) ---------
+#
+# Opt-in, reps-type only, additive on top of everything above: a UserProgram
+# entry with reps_ceiling IS NULL still uses every function above exactly as
+# before (the single-blended-target system). Only once a user has logged real
+# per-set data (ActivityLog.set_amounts) for an activity does it switch to
+# tracking each set position's own independent target — see
+# _maybe_start_per_set_tracking. REPS_MAX_SETS (above) is reused as-is for the
+# per-set cap, not duplicated under a new name.
+
+# The ease-back a set takes when a new set is created, scaled continuously by
+# that SET's own recent adherence — no fixed tiers (a 89%-vs-91%-adherence
+# cliff was explicitly rejected during planning in favor of a smooth scale).
+SET_DROP_MIN_PCT = 0.15   # at/above SET_DROP_ADHERENCE_CEILING adherence
+SET_DROP_MAX_PCT = 0.40   # at/below SET_DROP_ADHERENCE_FLOOR adherence
+SET_DROP_ADHERENCE_FLOOR = 0.50
+SET_DROP_ADHERENCE_CEILING = 1.00
+
+# A new set's starting value is built from a blend of the two sets around it,
+# never fresher/higher than what's already been proven.
+NEW_SET_SHARE_FROM_LEADING = 0.30
+NEW_SET_SHARE_FROM_FOLLOWING = 0.40
+NEW_SET_CAP_PCT_OF_FOLLOWING = 0.90
+
+# Pro level reuses the exact same two-stage ceiling already defined above
+# (REPS_STANDARD_CEILING -> REPS_HARD_CEILING) rather than inventing a third
+# number — the plan's own worked example (30 -> 50) is exactly this jump.
+# Once REPS_HARD_CEILING is reached a second time, growth holds there; no
+# further level exists yet (reasonable, deliberately conservative default —
+# flagged, not a silent guess).
 
 
 def compute_curve_increase(baseline_target: float, week: int, k: float) -> float:
@@ -162,6 +203,23 @@ def _window_adherence(session: Session, user_id: str, activity_type: str,
         return 0.0
     ratios = [min(float(r.total_volume) / target_volume, ADHERENCE_CAP) for r in rows]
     return sum(ratios) / len(ratios)
+
+
+def _window_logged_days(session: Session, user_id: str, activity_type: str, today: date) -> int:
+    """How many DISTINCT days this was logged in the trailing window — not a
+    row count, so logging the same exercise twice in one day (morning and
+    evening) still only counts as one day. Feeds MIN_LOGGED_DAYS_FOR_GROWTH;
+    see that constant's own docstring for why this check exists at all."""
+    window_start = today - timedelta(days=ADHERENCE_WINDOW_DAYS)
+    return session.scalar(
+        select(func.count(func.distinct(ActivityLog.local_date))).where(
+            ActivityLog.user_id == user_id,
+            ActivityLog.activity_type == activity_type,
+            ActivityLog.local_date > window_start,
+            ActivityLog.local_date <= today,
+            ActivityLog.implausible.is_(False),
+        )
+    ) or 0
 
 
 def _sides(taxonomy: ActivityTaxonomy) -> int:
@@ -455,7 +513,333 @@ def _already_progressed_today(session: Session, user_id: str, activity_type: str
         .order_by(ProgressionHistory.applied_at.desc())
         .limit(1)
     )
-    return last_applied is not None and last_applied.date() == today
+    if last_applied is None:
+        return False
+    # applied_at is written by the DB's own func.now(), i.e. UTC, but `today`
+    # is an IST date (today_ist) — this app is single-market IST throughout.
+    # Comparing the two directly meant that between 00:00 and 05:29 IST the
+    # UTC date is still "yesterday", so this guard silently missed and a
+    # second run in that window stacked another full week of progression on
+    # top of the first. Convert to IST before comparing dates.
+    if last_applied.tzinfo is None:
+        last_applied = last_applied.replace(tzinfo=timezone.utc)
+    return last_applied.astimezone(IST).date() == today
+
+
+# --- Per-set independent progression (PER_SET_PROGRESSION_PLAN.md) ---------
+#
+# Opt-in alternative to everything above, for one UserProgram entry at a time:
+# entry.reps_ceiling IS NULL means "use the existing single-blended system
+# unchanged" (every entry that exists today, and every non-reps activity
+# forever). Started the first time a user logs real per-set data
+# (ActivityLog.set_amounts) for a reps-type activity — see
+# start_per_set_tracking_if_needed, called from the route layer after
+# app.profile.service.log_activity (never imported the other way, to keep
+# this module -> profile direction one-directional, same principle as
+# _is_safe_to_progress above).
+
+def start_per_set_tracking_if_needed(session: Session, user_id: str, activity_type: str) -> None:
+    """No-op if already started, or if this isn't a reps-type UserProgram
+    entry. Seeds every current set at today's single blended target — "Week
+    1: 2 sets, 5 reps each, same starting point for everyone" — divergence
+    only emerges from real logged differences in the weeks after this."""
+    entry = session.get(UserProgram, (user_id, activity_type))
+    if entry is None or entry.reps_ceiling is not None:
+        return
+    taxonomy = session.get(ActivityTaxonomy, activity_type)
+    if taxonomy is None or taxonomy.prescription_type != "reps":
+        return
+    current = _tracking_amount(entry)
+    n = max(entry.target_sets, 1)
+    # Found live: a displayed reps target of "12.34" — per-set tracking only
+    # ever activates for prescription_type == "reps" (the guard above), so
+    # these are always rep counts and must round the same way
+    # _apply_new_volume already does for the single-target system (half-up to
+    # a whole number), not a generic round(v, 2) that leaves a fractional
+    # "reps" value a user could never actually perform.
+    entry.set_targets = [Decimal(str(_round_reps(current)))] * n
+    entry.internal_set_targets = [Decimal(str(round(current, 6)))] * n
+    entry.reps_ceiling = Decimal(str(REPS_STANDARD_CEILING))
+
+
+def _set_trailing_average(session: Session, user_id: str, activity_type: str,
+                          set_number: int, today: date) -> float | None:
+    """Trailing-REPS_TRAILING_WINDOW_DAYS average of what was actually logged
+    for THIS SET POSITION specifically — set_amounts[set_number-1] on each day
+    it was logged. A day whose set_amounts doesn't reach this position (fewer
+    sets done that day, or logged before this activity adopted per-set
+    tracking) is skipped entirely, never counted as a zero — same principle
+    as _reps_trailing_average's own None-when-no-data contract."""
+    window_start = today - timedelta(days=REPS_TRAILING_WINDOW_DAYS)
+    rows = session.scalars(
+        select(ActivityLog).where(
+            ActivityLog.user_id == user_id,
+            ActivityLog.activity_type == activity_type,
+            ActivityLog.local_date > window_start,
+            ActivityLog.local_date <= today,
+            ActivityLog.implausible.is_(False),
+        )
+    ).all()
+    values = [float(r.set_amounts[set_number - 1]) for r in rows
+              if r.set_amounts is not None and len(r.set_amounts) >= set_number]
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _set_window_adherence(session: Session, user_id: str, activity_type: str,
+                          set_number: int, target_amount: float, today: date) -> float:
+    """Same shape as _window_adherence, scoped to one set position — feeds
+    _set_drop_pct ("that SET's own recent consistency", confirmed design, not
+    one blended number for the whole exercise)."""
+    window_start = today - timedelta(days=ADHERENCE_WINDOW_DAYS)
+    rows = session.scalars(
+        select(ActivityLog).where(
+            ActivityLog.user_id == user_id,
+            ActivityLog.activity_type == activity_type,
+            ActivityLog.local_date > window_start,
+            ActivityLog.local_date <= today,
+            ActivityLog.implausible.is_(False),
+        )
+    ).all()
+    ratios = [min(float(r.set_amounts[set_number - 1]) / target_amount, ADHERENCE_CAP)
+              for r in rows if r.set_amounts is not None and len(r.set_amounts) >= set_number
+              and target_amount > 0]
+    if not ratios:
+        return 0.0
+    return sum(ratios) / len(ratios)
+
+
+def _set_drop_pct(adherence: float) -> float:
+    """Confirmed design: a continuous scale, not fixed tiers — a 89%-vs-91%
+    adherence cliff was explicitly rejected during planning. Clamped to the
+    [floor, ceiling] adherence range first, so adherence outside [50%, 100%]
+    (e.g. the >100% an overachiever can reach) still produces a sane,
+    bounded drop rather than a nonsense extrapolated one."""
+    adherence = max(SET_DROP_ADHERENCE_FLOOR, min(SET_DROP_ADHERENCE_CEILING, adherence))
+    span = SET_DROP_ADHERENCE_CEILING - SET_DROP_ADHERENCE_FLOOR
+    frac = (adherence - SET_DROP_ADHERENCE_FLOOR) / span
+    return SET_DROP_MAX_PCT - frac * (SET_DROP_MAX_PCT - SET_DROP_MIN_PCT)
+
+
+def _last_week_growth_pct(session: Session, user_id: str, activity_type: str,
+                          set_number: int) -> float:
+    """The most recently recorded change for one specific set position — only
+    used by the Set-3-boosts-Set-4 rule, which needs "last week's growth",
+    not this week's (the trigger set's own ceiling-hit this week is a
+    separate event from what it had already been doing before)."""
+    row = session.scalars(
+        select(ProgressionHistory).where(
+            ProgressionHistory.user_id == user_id,
+            ProgressionHistory.activity_type == activity_type,
+            ProgressionHistory.set_number == set_number,
+        ).order_by(ProgressionHistory.applied_at.desc()).limit(1)
+    ).first()
+    if row is None or float(row.old_target) <= 0:
+        return 0.0
+    return float(row.new_target) / float(row.old_target) - 1
+
+
+def _write_set_history(user_id: str, activity_type: str, set_number: int, *,
+                       old_target: float, new_target: float, adherence_pct: float,
+                       curve_pct: float, reason: str) -> ProgressionHistory:
+    return ProgressionHistory(
+        user_id=user_id, activity_type=activity_type, set_number=set_number,
+        old_target=Decimal(str(round(old_target, 2))),
+        new_target=Decimal(str(round(new_target, 2))),
+        adherence_pct=Decimal(str(round(adherence_pct * 100, 2))),
+        curve_pct=Decimal(str(round(_clamp_for_history(curve_pct / 100), 2))),
+        reason=reason,
+    )
+
+
+def _sync_entry_from_sets(entry: UserProgram, targets: list[float], internal: list[float]) -> None:
+    """Keeps the OLD single-value columns (target_sets/target_amount/
+    internal_target_amount) as sane summaries — the count and the average —
+    so any code that only knows about those (nothing needs updating to stay
+    correct, it just won't see the per-set breakdown).
+
+    Found live: this used a generic round(v, 2), displaying reps targets like
+    "12.34" — per-set tracking is only ever active for prescription_type ==
+    "reps" (gated in start_per_set_tracking_if_needed), so every value here
+    is a rep count and must round the same half-up-to-a-whole-number way
+    _apply_new_volume already does for the single-target system, not a
+    fractional "reps" value nobody can actually perform."""
+    entry.set_targets = [Decimal(str(_round_reps(v))) for v in targets]
+    entry.internal_set_targets = [Decimal(str(round(v, 6))) for v in internal]
+    entry.target_sets = len(targets)
+    entry.target_amount = Decimal(str(_round_reps(sum(targets) / len(targets))))
+    entry.internal_target_amount = Decimal(str(round(sum(internal) / len(internal), 6)))
+
+
+def _create_new_set(session: Session, user_id: str, entry: UserProgram, today: date, *,
+                    leading_idx: int, following_idx: int,
+                    targets: list[float], internal: list[float]) -> ProgressionHistory:
+    """Exact confirmed formula: both existing sets ease back by their OWN
+    adherence-driven drop (§7), and the new set is a blend of their ORIGINAL
+    (pre-drop) values, capped so it can never exceed (and so the result stays
+    descending) the following set's new, already-eased-back value."""
+    leading_orig = targets[leading_idx]
+    following_orig = targets[following_idx]
+
+    leading_adherence = _set_window_adherence(
+        session, user_id, entry.activity_type, leading_idx + 1, leading_orig, today)
+    following_adherence = _set_window_adherence(
+        session, user_id, entry.activity_type, following_idx + 1, following_orig, today)
+
+    new_leading = leading_orig * (1 - _set_drop_pct(leading_adherence))
+    new_following = following_orig * (1 - _set_drop_pct(following_adherence))
+
+    new_set_raw = (NEW_SET_SHARE_FROM_LEADING * leading_orig
+                   + NEW_SET_SHARE_FROM_FOLLOWING * following_orig)
+    new_set_value = min(new_set_raw, NEW_SET_CAP_PCT_OF_FOLLOWING * new_following)
+
+    targets[leading_idx] = _round_reps(new_leading)
+    internal[leading_idx] = new_leading
+    targets[following_idx] = _round_reps(new_following)
+    internal[following_idx] = new_following
+    targets.append(_round_reps(new_set_value))
+    internal.append(new_set_value)
+
+    return _write_set_history(
+        user_id, entry.activity_type, len(targets),
+        old_target=0.0, new_target=targets[-1],
+        adherence_pct=(leading_adherence + following_adherence) / 2,
+        curve_pct=0.0, reason="set_created",
+    )
+
+
+def _boost_last_set(session: Session, user_id: str, entry: UserProgram, *,
+                    targets: list[float], internal: list[float],
+                    adherence_pct: float) -> ProgressionHistory:
+    """Set 3 (the second-to-last position) hit its ceiling while already at
+    the 4-set max — confirmed formula: Set 4's normal growth this week,
+    boosted further by (Set 3's own growth % last week + Set 4's own growth %
+    last week), hard-capped at the ceiling."""
+    last_idx = len(targets) - 1
+    trigger_idx = last_idx - 1
+    boost_pct = (_last_week_growth_pct(session, user_id, entry.activity_type, trigger_idx + 1)
+                 + _last_week_growth_pct(session, user_id, entry.activity_type, last_idx + 1))
+    old_last = targets[last_idx]
+    boosted = min(internal[last_idx] * (1 + boost_pct), float(entry.reps_ceiling))
+    targets[last_idx] = _round_reps(boosted)
+    internal[last_idx] = boosted
+    return _write_set_history(
+        user_id, entry.activity_type, last_idx + 1,
+        old_target=old_last, new_target=targets[last_idx],
+        adherence_pct=adherence_pct, curve_pct=boost_pct * 100, reason="set_boost",
+    )
+
+
+def _run_per_set_progression(session: Session, user_id: str, entry: UserProgram,
+                             taxonomy: ActivityTaxonomy, today: date, *,
+                             reason: str, adherence_pct: float) -> list[ProgressionHistory]:
+    """The per-set alternative to the single-exercise reps fast track —
+    called instead of it when entry.reps_ceiling is not None. Shares the same
+    curve/hold/reduce decision already made by the caller (the exercise-wide
+    adherence + MIN_LOGGED_DAYS_FOR_GROWTH gate applies once, up front, same
+    as always — only WHAT HAPPENS inside "curve" differs: each set grows on
+    its own trajectory instead of one blended number)."""
+    old_targets = [float(v) for v in entry.set_targets]
+    old_internal = [float(v) for v in (entry.internal_set_targets or entry.set_targets)]
+    n = len(old_targets)
+    written: list[ProgressionHistory] = []
+
+    if reason == "hold":
+        for idx in range(n):
+            written.append(_write_set_history(
+                user_id, entry.activity_type, idx + 1,
+                old_target=old_targets[idx], new_target=old_targets[idx],
+                adherence_pct=adherence_pct, curve_pct=0.0, reason="hold"))
+        return written
+
+    if reason == "reduce":
+        floor_each = 0.5 * float(taxonomy.default_amount)
+        new_targets, new_internal = list(old_targets), list(old_internal)
+        for idx in range(n):
+            reduced = max(old_internal[idx] * (1 - REDUCE_PCT), floor_each)
+            new_internal[idx] = reduced
+            new_targets[idx] = _round_reps(reduced)
+            set_reason = "reduce" if new_targets[idx] != old_targets[idx] else "hold"
+            written.append(_write_set_history(
+                user_id, entry.activity_type, idx + 1,
+                old_target=old_targets[idx], new_target=new_targets[idx],
+                adherence_pct=adherence_pct, curve_pct=-REDUCE_PCT * 100, reason=set_reason))
+        _sync_entry_from_sets(entry, new_targets, new_internal)
+        return written
+
+    # reason == "curve": each set grows independently, via the exact same
+    # curve-inversion engine the single-exercise reps fast track already
+    # uses (REPS_FAST_TRACK_K), just scoped to one position's own baseline
+    # and trailing average instead of one blended pair.
+    new_targets, new_internal = list(old_targets), list(old_internal)
+    hit_ceiling = [False] * n
+    ceiling = float(entry.reps_ceiling)
+    for idx in range(n):
+        baseline = old_internal[idx]
+        avg = _set_trailing_average(session, user_id, entry.activity_type, idx + 1, today)
+        if avg is None:
+            avg = baseline
+        if baseline <= 0:
+            raw_target = baseline
+        else:
+            w_eff = math.exp((avg / baseline - 1) / REPS_FAST_TRACK_K) - 1
+            raw_target = baseline * (1 + REPS_FAST_TRACK_K * math.log(1 + w_eff + 1))
+        raw_target = max(raw_target, baseline)  # never regress — a rolling average can
+                                                 # legitimately read lower some week
+        if raw_target >= ceiling:
+            hit_ceiling[idx] = True
+        capped = min(raw_target, ceiling)
+        new_internal[idx] = capped
+        new_targets[idx] = _round_reps(capped)
+        set_reason = "curve" if new_targets[idx] != old_targets[idx] else "hold"
+        curve_pct = (raw_target / baseline - 1) * 100 if baseline > 0 else 0.0
+        written.append(_write_set_history(
+            user_id, entry.activity_type, idx + 1,
+            old_target=old_targets[idx], new_target=new_targets[idx],
+            adherence_pct=adherence_pct, curve_pct=curve_pct, reason=set_reason))
+
+    # Cascade — exact trigger rules by position (confirmed, not a generalized
+    # pattern): only ONE of these can fire in a given week, checked in a
+    # fixed priority order matching how the sets were actually just grown
+    # above (earlier positions take precedence, matching "Set 1 -> creates
+    # Set 3" happening before "Set 2 -> creates Set 4" could ever apply to
+    # the same entry in the same run).
+    cascade_row = None
+    if n == 2 and hit_ceiling[0]:
+        cascade_row = _create_new_set(
+            session, user_id, entry, today, leading_idx=0, following_idx=1,
+            targets=new_targets, internal=new_internal)
+    elif n == 3 and hit_ceiling[1]:
+        cascade_row = _create_new_set(
+            session, user_id, entry, today, leading_idx=1, following_idx=2,
+            targets=new_targets, internal=new_internal)
+    elif n == REPS_MAX_SETS and hit_ceiling[REPS_MAX_SETS - 2]:
+        cascade_row = _boost_last_set(
+            session, user_id, entry, targets=new_targets, internal=new_internal,
+            adherence_pct=adherence_pct)
+    elif (n == REPS_MAX_SETS and hit_ceiling[REPS_MAX_SETS - 1]
+          and ceiling < REPS_HARD_CEILING):
+        # Set 4 itself hit ceiling -> Pro level. Reuses the existing two-stage
+        # ceiling constants rather than inventing a third number (REPS_
+        # STANDARD_CEILING -> REPS_HARD_CEILING is exactly the plan's own
+        # worked example, 30 -> 50). No special "test week" calculation: the
+        # very next normal week already reflects real performance against
+        # the new ceiling, which is what makes that week the test — see
+        # UserProgram.pro_leveled_at's own docstring.
+        entry.reps_ceiling = Decimal(str(REPS_HARD_CEILING))
+        entry.pro_leveled_at = datetime.now(timezone.utc)
+        cascade_row = _write_set_history(
+            user_id, entry.activity_type, REPS_MAX_SETS,
+            old_target=new_targets[-1], new_target=new_targets[-1],
+            adherence_pct=adherence_pct, curve_pct=0.0, reason="pro_level")
+
+    if cascade_row is not None:
+        written.append(cascade_row)
+        session.add(cascade_row)
+
+    _sync_entry_from_sets(entry, new_targets, new_internal)
+    return written
 
 
 def run_weekly_progression(session: Session, user_id: str, *,
@@ -496,10 +880,15 @@ def run_weekly_progression(session: Session, user_id: str, *,
         curve_pct = compute_curve_increase(old_volume, week, k)
         adherence_pct = _window_adherence(session, user_id, entry.activity_type,
                                            old_volume, today)
+        days_logged = _window_logged_days(session, user_id, entry.activity_type, today)
 
         # 15.3 rule table (the discomfort-hold row is not reachable — see module
         # docstring) applied to arrive at a raw (pre-guard) percentage change.
-        if adherence_pct >= 0.80:
+        # MIN_LOGGED_DAYS_FOR_GROWTH gates "curve" specifically — strong
+        # adherence on too few real days falls through to the >=0.50 branch
+        # below (hold), never to "reduce": nothing about those days was bad,
+        # there just weren't enough of them yet to earn an increase.
+        if adherence_pct >= 0.80 and days_logged >= MIN_LOGGED_DAYS_FOR_GROWTH:
             raw_pct = curve_pct
             reason = "curve"
         elif adherence_pct >= 0.50:
@@ -522,6 +911,18 @@ def run_weekly_progression(session: Session, user_id: str, *,
         if reason == "curve" and not _is_safe_to_progress(session, user_id, entry.activity_type):
             raw_pct = 0.0
             reason = "hold"
+
+        if entry.reps_ceiling is not None:
+            # Opted into per-set independent tracking (start_per_set_tracking_
+            # if_needed) — this entry's targets are no longer one blended
+            # number at all, so none of the single-exercise machinery below
+            # (old_volume/_apply_new_volume/the one ProgressionHistory row
+            # per entry) applies. The curve/hold/reduce decision already made
+            # above still gates it — only WHAT HAPPENS inside "curve" differs.
+            written.extend(_run_per_set_progression(
+                session, user_id, entry, taxonomy, today,
+                reason=reason, adherence_pct=adherence_pct))
+            continue
 
         if taxonomy.prescription_type == "reps" and reason == "curve":
             # Reps-only fast track (see _reps_curve_step) replaces the generic
@@ -585,6 +986,12 @@ DEFAULT_SERIES_WEEKS = 12  # matches the trailing-window sizes used elsewhere in
 # enough to see the curve's early-steep/later-flat shape, short enough that a
 # years-old account doesn't hand the frontend an ever-growing payload.
 
+# Row-fetch ceiling multiplier: at most this many activities contribute points
+# to the series, so `weeks * this` bounds the query. Comfortably above the 12
+# activities in the reviewed taxonomy, so a real account never loses points to
+# the cap — it exists to stop the query being unbounded, not to trim data.
+MAX_SERIES_ACTIVITIES = 30
+
 
 def progression_series(session: Session, user_id: str, *,
                         weeks: int = DEFAULT_SERIES_WEEKS) -> list[dict]:
@@ -595,11 +1002,21 @@ def progression_series(session: Session, user_id: str, *,
     escalation's own pct, for an "escalation"-reason row); the actually-applied
     change is old_target -> new_target on the same point, so a chart can show
     both the trend line and what the guards did to it if it wants to."""
-    rows = session.scalars(
+    # Bounded deliberately. This runs on GET /v1/dashboard/summary — the
+    # hottest authenticated path — and previously selected EVERY history row
+    # the account had ever accumulated, only to slice the last `weeks` per
+    # activity in Python below. With the scheduler firing daily across ~12
+    # activities, a two-year account was loading well over a thousand rows on
+    # every single dashboard open. Fetch newest-first with a ceiling sized to
+    # the window actually rendered, then restore ascending order for the
+    # grouping below, which expects oldest-first.
+    max_rows = weeks * MAX_SERIES_ACTIVITIES
+    rows = list(reversed(session.scalars(
         select(ProgressionHistory)
         .where(ProgressionHistory.user_id == user_id)
-        .order_by(ProgressionHistory.applied_at.asc())
-    ).all()
+        .order_by(ProgressionHistory.applied_at.desc())
+        .limit(max_rows)
+    ).all()))
 
     by_activity: dict[str, list[ProgressionHistory]] = {}
     for r in rows:
@@ -668,9 +1085,25 @@ def apply_escalation(session: Session, user_id: str, activity_type: str,
     if taxonomy is None:
         raise NotFound(f"Unknown activity: {activity_type}")
 
+    today = today_ist()
+    # Found live (code audit): run_weekly_progression checks this same guard
+    # for every entry it touches (see its own loop), but this — the OTHER
+    # writer of the exact same ProgressionHistory rows — never did. A single
+    # chat-confirmed escalation tap is meant to be one week's worth of
+    # increase; without this, a user (or a replayed request) could confirm
+    # several proposals in one sitting and stack several weeks of increase
+    # onto the same exercise the same day. ESCALATION_DAILY_LIMIT bounds how
+    # many CONFIRMATION REQUESTS happen per day — this bounds how many
+    # actually get APPLIED to a given activity per day, which is the number
+    # that actually matters for someone's body.
+    if _already_progressed_today(session, user_id, activity_type, today):
+        raise Conflict(
+            f"{taxonomy.display_name} was already updated today — "
+            "try again tomorrow."
+        )
+
     old_target = float(entry.target_amount)
     sides = _sides(taxonomy)
-    today = today_ist()
     reps_ceiling = None
     if taxonomy.prescription_type == "reps":
         reps_ceiling = _reps_cycle_ceiling(taxonomy, entry)

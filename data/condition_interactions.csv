@@ -1,0 +1,2 @@
+condition_a,condition_b,activity_type,verdict,note,reviewer,reviewed_at,version
+arthritis_knee,obesity,running,avoid,"Extra body weight multiplies the repeated impact load on an already-damaged knee joint — a materially higher risk than either condition alone. Prefer walking or low-impact cardio instead.",product-team (not clinically reviewed),2026-10-08,1

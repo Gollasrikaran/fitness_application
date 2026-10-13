@@ -30,6 +30,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.catalog.models import ActivityTaxonomy, Condition, SafetyGridCell
+from app.platform import redis_clients as rc
 from app.platform.errors import QuotaExhausted, RateLimited, ValidationError
 from app.profile.models import ActivityLog, UserCondition, UserProfile, UserProgram
 from app.profile.service import (
@@ -52,6 +53,8 @@ QUOTA_TYPE = "rehab_llm"
 # leakier design, not against real per-message cost. 5 matches the number
 # _refund_quota's own docstring already referenced.
 DAILY_LIMIT = 5
+VOICE_QUOTA_TYPE = "voice_llm"
+VOICE_DAILY_LIMIT = 60
 
 # Found live (third-pass code audit): escalation_confirmation is deliberately
 # exempt from DAILY_LIMIT above (confirming a suggestion is a UI action, not a
@@ -68,6 +71,12 @@ ESCALATION_DAILY_LIMIT = 10
 
 MAX_QUESTION_LENGTH = 500
 MIN_LENGTH_WORTH_CLASSIFYING = 15  # skip the extra LLM call for "hi"-length messages
+
+# How long a "you were asked which condition, and already paid for that turn"
+# marker stays redeemable (see rc.key_pending_condition_confirm). Long enough
+# for a user to read the options and tap one; far too short to bank a free
+# answer for later.
+PENDING_CONFIRM_TTL_SECONDS = 15 * 60
 
 SYSTEM_PROMPT = """You are a rehab and pain guidance assistant inside a beginner-level \
 fitness app for adults in India. For medical/exercise questions, answer using ONLY the \
@@ -144,6 +153,19 @@ turn and is always more current than anything said in past conversation context 
 earlier exchange stated a different date or a different set of exercises for the same \
 question, that earlier answer was based on incomplete or since-corrected data. Always \
 follow the Actual logged activity block given now, never repeat what an earlier answer said.
+11. After your whole answer, on a NEW final line, add exactly one line in this exact \
+format and nothing else on it: SUGGESTED_EXERCISES: <name>, <name> — or \
+SUGGESTED_EXERCISES: NONE. List an exercise there ONLY if your answer is actually \
+recommending the user add it to their program as a specific action to take right now \
+— names must come only from the approved list, exactly as written there. Do NOT list an \
+exercise just because you mentioned it in passing as one example of general self-care \
+(e.g. "gentle movement such as walking" mentions walking without recommending it — that \
+does not belong on this line). When your answer gave general self-care advice instead of \
+naming a specific exercise (rule 1), or discussed medication/surgery (rules 2-3), or said \
+the information isn't available (rule 4), always write SUGGESTED_EXERCISES: NONE — those \
+answers are never a specific program suggestion, no matter what words appear in them. \
+This line is read by the app, not shown to the user — it must still appear even though \
+it isn't part of the natural-language answer.
 """
 
 CONDITION_MATCH_PROMPT = """A user of a fitness/rehab app wrote a message describing pain \
@@ -187,13 +209,8 @@ NO_CONTENT_ANSWER = (
 # its own that nothing retrieved actually answers it (rule 4 of SYSTEM_PROMPT)
 # — the same "don't trust the model's compliance" lesson already learned for
 # medication/surgery/exercise-naming, just for topic relevance instead.
-# Measured live: off-topic questions ("capital of France", "15 times 34",
-# "prime minister of India", "write me a poem") top out around 0.10-0.18
-# similarity; real on-topic questions, even vague ones ("is walking good for
-# me", "my joints hurt sometimes"), start around 0.38 and go up from there —
-# a wide, clean gap. 0.25 sits in the middle of that gap with real margin on
-# both sides.
-RELEVANCE_THRESHOLD = 0.25
+# Threshold itself now lives in vectorstore.RELEVANCE_THRESHOLD — retrieve_chunks
+# uses the same number for its own-condition-first search (see its docstring).
 
 SAFETY_FALLBACK_ANSWER = (
     "I'm not able to provide a specific medication or surgery name — that's something "
@@ -306,21 +323,47 @@ ACTIVITY_CATEGORIES = {
 }
 
 
+def _avoided_activity_types(session: Session, condition_codes: list[str]) -> set[str]:
+    """Anything the grid marks `avoid` for ANY ONE of this user's conditions.
+
+    Found live (code audit): "safe" and "avoid" are not opposites once a user
+    has more than one condition, and the two halves of this app disagreed
+    about which wins. The program side blocks on ANY avoid
+    (profile.service._blocked_activities); the chat side below approved on
+    ANY safe — so an activity that is safe for one of a user's conditions and
+    avoid for another came out APPROVED for the chatbot while being BLOCKED
+    on their dashboard. Real case in the shipped grid: hamstring_stretch is
+    safe for gout and avoid for herniated_disk, so a user with both could be
+    told by the chatbot to do the exact stretch the app had removed from
+    their program for their disc. `avoid` must always win, everywhere."""
+    if not condition_codes:
+        return set()
+    rows = session.execute(
+        select(SafetyGridCell.activity_type)
+        .where(SafetyGridCell.condition_code.in_(condition_codes),
+               SafetyGridCell.verdict == "avoid")
+        .distinct()
+    ).all()
+    return {r[0] for r in rows}
+
+
 def _approved_activities(session: Session, condition_codes: list[str]) -> list[str]:
     """Exercise display names the reviewed safety grid (13.3) has verdicted "safe"
-    for any of this user's conditions — the ONLY exercises the prompt is allowed to
-    let the model name. Everything else (verdict "modify"/"avoid", or simply not in
+    for any of this user's conditions AND does not mark "avoid" for any other
+    condition they have — the ONLY exercises the prompt is allowed to let the
+    model name. Everything else (verdict "modify"/"avoid", or simply not in
     the grid for this condition) is deliberately excluded; the model falls back to
     generic self-care guidance for those instead."""
     if not condition_codes:
         return []
+    avoided = _avoided_activity_types(session, condition_codes)
     rows = session.execute(
-        select(ActivityTaxonomy.display_name)
+        select(ActivityTaxonomy.activity_type, ActivityTaxonomy.display_name)
         .join(SafetyGridCell, SafetyGridCell.activity_type == ActivityTaxonomy.activity_type)
         .where(SafetyGridCell.condition_code.in_(condition_codes), SafetyGridCell.verdict == "safe")
         .distinct()
     ).all()
-    return sorted({r[0] for r in rows})
+    return sorted({name for code, name in rows if code not in avoided})
 
 
 def _approved_activity_types(session: Session, condition_codes: list[str]) -> set[str]:
@@ -328,16 +371,24 @@ def _approved_activity_types(session: Session, condition_codes: list[str]) -> se
     display names — used to re-validate a client-supplied list of activities
     against what's ACTUALLY safety-approved right now (16.3's principle:
     re-verify, don't trust a possibly-stale value the client echoes back),
-    before set_program_to_activities ever touches the user's program."""
+    before set_program_to_activities ever touches the user's program.
+
+    Excludes anything `avoid` for any of the user's other conditions, for the
+    reason spelled out in _avoided_activity_types — without that, this
+    "re-verification" was the very thing that let an avoid-verdict exercise be
+    written back onto a user's dashboard by a single chat confirmation tap,
+    with no OverrideConsent row and none of the 14.7 warning flow that
+    add_program_entry enforces for exactly this case."""
     if not condition_codes:
         return set()
+    avoided = _avoided_activity_types(session, condition_codes)
     rows = session.execute(
         select(ActivityTaxonomy.activity_type)
         .join(SafetyGridCell, SafetyGridCell.activity_type == ActivityTaxonomy.activity_type)
         .where(SafetyGridCell.condition_code.in_(condition_codes), SafetyGridCell.verdict == "safe")
         .distinct()
     ).all()
-    return {r[0] for r in rows}
+    return {r[0] for r in rows} - avoided
 
 
 def _hidden_by_sport_focus_change(session: Session, user_id: str) -> list[dict]:
@@ -369,7 +420,8 @@ def _hidden_by_sport_focus_change(session: Session, user_id: str) -> list[dict]:
     return [{"activity_type": a, "display_name": d} for a, d in rows]
 
 
-def _enforce_approved_exercises_only(session: Session, answer: str, approved: list[str]) -> str:
+def _enforce_approved_exercises_only(session: Session, answer: str,
+                                      approved: list[str]) -> tuple[str, bool]:
     """Runtime backstop for prompt rule 1 (found live, third-pass code audit): the
     module's own docstring calls this the CENTRAL safety boundary — a free-tier
     model doesn't always obey a prompt instruction 100% of the time (the same
@@ -385,11 +437,12 @@ def _enforce_approved_exercises_only(session: Session, answer: str, approved: li
     approved_lower = {a.lower() for a in approved}
     catalog = session.execute(select(ActivityTaxonomy.display_name)).scalars().all()
     offending = next(
-        (name for name in catalog if name.lower() in lowered and name.lower() not in approved_lower),
+        (name for name in catalog
+         if _mentions(lowered, name.lower()) and name.lower() not in approved_lower),
         None,
     )
     if offending is None:
-        return answer
+        return answer, False
     if not approved:
         # No exercise at all is approved for this user's condition(s) — dead-end,
         # since there's no safe alternative to offer instead. Found live (this
@@ -397,35 +450,80 @@ def _enforce_approved_exercises_only(session: Session, answer: str, approved: li
         # specifically about medication/surgery — confusing and just plain wrong
         # to show someone who asked an exercise question and got a mismatched
         # canned response about a topic they never raised.
-        return NO_APPROVED_EXERCISE_ANSWER
+        return NO_APPROVED_EXERCISE_ANSWER, True
     alternatives = ", ".join(approved)
     return (
         f"I can't recommend {offending} for your condition — it isn't on your approved "
         f"exercise list. Exercises that ARE approved for you: {alternatives}. Ask me about "
         f"any of these instead."
-    )
+    ), True
 
 
-def _named_approved_activities(session: Session, answer: str, approved: list[str]) -> list[dict]:
-    """Which of the user's approved exercises does the FINAL answer (after the
-    safety backstop above already ran) actually name? Drives the "add these
-    suggested exercises to your program?" confirmation step — a structural,
-    code-level answer to "what did the AI just suggest," not something the
-    client has to guess by parsing free text on its own. Returns
-    activity_type (not just display_name) since that's what add/remove
-    program-entry calls need."""
-    if not approved:
-        return []
-    lowered = answer.lower()
-    approved_lower = {a.lower() for a in approved}
+def _mentions(lowered_text: str, lowered_name: str) -> bool:
+    """Word-boundary containment, not a bare substring test. Found live (code
+    audit): plain `name in text` matches inside an unrelated longer word and,
+    more importantly, matches inside a NEGATION ("avoid running for now") just
+    as happily as a genuine mention — this doesn't fix the negation case (that
+    needs real language understanding, not a string check), but it does close
+    the cheaper false-positive of a name matching as a substring of something
+    else entirely."""
+    return re.search(rf"\b{re.escape(lowered_name)}\b", lowered_text) is not None
+
+
+SUGGESTED_EXERCISES_MARKER = re.compile(
+    r"\n*SUGGESTED_EXERCISES:\s*(.*?)\s*$", re.IGNORECASE | re.DOTALL,
+)
+
+
+def _extract_suggested_exercises(session: Session, raw_answer: str,
+                                  approved: list[str]) -> tuple[str, list[dict]]:
+    """Splits rule 11's machine-readable marker line off the end of the raw
+    model output — returns (visible_answer_with_marker_removed, suggestions).
+
+    Found live (real user report, this session): the previous approach
+    (_named_approved_activities, now removed) guessed what the model had
+    "suggested" by scanning the finished prose for approved exercise names
+    appearing anywhere in it. A user asked about tight hamstrings, the model
+    correctly gave generic self-care advice ("...low-impact activities such
+    as walking to maintain circulation...") without recommending any specific
+    exercise — but the word "walking" was still a literal match, so the app
+    offered a one-tap "suggestion" chip for it anyway. Confirming it invoked
+    the "switch program focus" behavior (set_program_to_activities, see
+    _confirm_program_update's own docstring) and hid the user's entire
+    program down to just Walking, over a passing mention in an unrelated
+    sentence, not anything the user or the model actually asked to change.
+    No amount of smarter text-scanning closes this reliably — the model
+    already KNOWS whether it's making a recommendation, so rule 11 now asks
+    it to say so directly and unambiguously, on its own dedicated line,
+    instead of the app trying to infer intent from prose after the fact.
+
+    Fails CLOSED: a missing or malformed marker line (a free-tier model
+    doesn't always follow instructions) yields zero suggestions rather than
+    falling back to the old prose-scanning behaviour — silently offering no
+    "add to program" button is a minor missed convenience; silently offering
+    one based on a misread is a safety-relevant mistake, per the incident
+    above. Every name is still re-validated against the approved list here
+    (case-insensitively) and, again, against the CURRENT approved list at
+    confirmation time (_confirm_program_update) — this function only trims
+    the model's claim down to what it's allowed to claim, never trusts it."""
+    match = SUGGESTED_EXERCISES_MARKER.search(raw_answer)
+    if match is None:
+        return raw_answer, []
+    visible = raw_answer[:match.start()].rstrip()
+    claimed = [n.strip() for n in match.group(1).split(",") if n.strip()]
+    if not claimed or claimed == ["NONE"]:
+        return visible, []
+    approved_lower = {a.lower(): a for a in approved}
+    valid_names = {approved_lower[c.lower()] for c in claimed if c.lower() in approved_lower}
+    if not valid_names:
+        return visible, []
     rows = session.execute(
         select(ActivityTaxonomy.activity_type, ActivityTaxonomy.display_name)
-        .where(ActivityTaxonomy.display_name.in_(approved))
+        .where(ActivityTaxonomy.display_name.in_(valid_names))
     ).all()
-    return [
+    return visible, [
         {"activity_type": activity_type, "display_name": display_name}
         for activity_type, display_name in rows
-        if display_name.lower() in approved_lower and display_name.lower() in lowered
     ]
 
 
@@ -455,6 +553,15 @@ def _recent_full_exchanges(session: Session, user_id: str,
     return list(reversed(rows))  # oldest first — reads like a timeline
 
 
+MAX_OLDER_MEMORY = 30  # queue cap — beyond this, the oldest important memories
+# stop being pulled into the prompt (they stay in the table, just out of
+# context). Without a cap this query has no LIMIT at all: a long-running
+# account's prompt grows every single day it chats, and eventually exceeds
+# the model's context window, permanently failing every future message for
+# that user. 30 is generous (~6 days at the 5/day quota, most of them
+# unlikely to be "important") while keeping prompt size bounded for good.
+
+
 def _older_important_memory(session: Session, user_id: str,
                             recent_limit: int = RECENT_FULL_LIMIT) -> list[RehabMemory]:
     """Everything BEYOND the most recent full exchanges (those are covered in full
@@ -464,12 +571,16 @@ def _older_important_memory(session: Session, user_id: str,
     carries nothing forward for a future exchange, so it's deliberately left out
     — keeps this block naturally small instead of growing without bound as an
     account accumulates history, with no extra LLM call needed to compress it."""
+    # Over-fetch before filtering (some rows in this page won't be "important"),
+    # then hard-cap the filtered result — the actual bound on what reaches the
+    # prompt is MAX_OLDER_MEMORY, not however many rows happen to match here.
     rows = session.scalars(
         select(RehabMemory).where(RehabMemory.user_id == user_id)
         .order_by(RehabMemory.created_at.desc())
         .offset(recent_limit)
+        .limit(MAX_OLDER_MEMORY * 4)
     ).all()
-    important = [r for r in rows if r.pain_persisting or r.exercises_mentioned]
+    important = [r for r in rows if r.pain_persisting or r.exercises_mentioned][:MAX_OLDER_MEMORY]
     return list(reversed(important))
 
 
@@ -733,6 +844,15 @@ def _add_condition(session: Session, user_id: str, condition_code: str) -> dict:
     profile = session.scalar(
         select(UserProfile).where(UserProfile.user_id == user_id).with_for_update()
     )
+    if profile is None:
+        # Found live (code audit): nothing requires onboarding before
+        # /v1/rehab/query, so a user who signed up and went straight to the
+        # chat could reach here with no profile row — `profile.age` below
+        # then raised AttributeError as an uncaught 500, AFTER their quota
+        # slot had already been committed. They paid for the crash.
+        raise ValidationError(
+            "Complete your profile setup before recording a condition from chat."
+        )
     existing_codes = list(session.scalars(
         select(UserCondition.condition_code).where(UserCondition.user_id == user_id)
     ).all())
@@ -1033,7 +1153,8 @@ def _performance_context(session: Session, user_id: str, question: str, *,
 
 
 def _retrieve_and_answer(session: Session, user_id: str, question: str, *, rag_db_url: str,
-                          openrouter_api_key: str, rlm_enabled: bool = True) -> dict:
+                          openrouter_api_key: str, rlm_enabled: bool = True,
+                          charged: bool = True) -> dict:
     """Quota is consumed once, unconditionally, by answer_query before this
     is ever called (product decision, found live in a code audit: every
     real message now counts, no matter which path it takes) — this function
@@ -1124,7 +1245,7 @@ def _retrieve_and_answer(session: Session, user_id: str, question: str, *, rag_d
         # match the same as no match at all, rather than handing the model
         # low-relevance content and hoping it independently notices none of
         # it actually answers the question (see RELEVANCE_THRESHOLD's comment).
-        if chunks and chunks[0]["similarity"] < RELEVANCE_THRESHOLD:
+        if chunks and chunks[0]["similarity"] < vectorstore.RELEVANCE_THRESHOLD:
             chunks = []
         # A performance or activity-recall question legitimately has nothing in
         # the medical RAG corpus to retrieve — that must not fall through to
@@ -1161,16 +1282,32 @@ def _retrieve_and_answer(session: Session, user_id: str, question: str, *, rag_d
                  "content": f"{retrieved_part}{approved_block}\n\n"
                             f"{performance_part}{memory_block}\n\nQuestion: {question}"},
             ]
-            answer = _enforce_no_medication_or_surgery(
-                vectorstore.chat_complete(messages, openrouter_api_key)
+            raw_answer = vectorstore.chat_complete(messages, openrouter_api_key)
+            # Peel rule 11's marker line off BEFORE any safety backstop or the
+            # user ever sees the text — it's for this app to read, never part
+            # of the visible answer, and leaving it in would let a stray
+            # "SUGGESTED_EXERCISES: ..." line either get shown verbatim or
+            # trip the unapproved-exercise backstop on its own contents.
+            answer, suggested_activities = _extract_suggested_exercises(
+                session, raw_answer, approved
             )
-            answer = _enforce_approved_exercises_only(session, answer, approved)
+            answer = _enforce_no_medication_or_surgery(answer)
+            answer, was_corrected = _enforce_approved_exercises_only(session, answer, approved)
             # Drives the "add these suggested exercises to your program?"
             # confirmation (found live: a user wanted a one-tap way to
             # actually add exercises the chat just suggested, not just read
-            # about them). Computed from the FINAL, safety-checked answer
-            # text — never from what the model was merely asked to say.
-            suggested_activities = _named_approved_activities(session, answer, approved)
+            # about them).
+            #
+            # Also cleared when the backstop corrected the answer (found live,
+            # this session): that replacement text lists EVERY approved
+            # exercise as "safe alternatives" in one sentence — the model's
+            # own marker line was written for its ORIGINAL answer, not this
+            # replacement, so it no longer describes what the user is
+            # actually looking at. Confirming a suggestion here would
+            # "switch focus" the whole program (see set_program_to_activities'
+            # docstring) over a safety correction, not a recommendation.
+            if was_corrected:
+                suggested_activities = []
 
             # Tag this exchange's memory row by what it was actually RETRIEVED as
             # being about, not by the user's onboarded condition_codes. Those two
@@ -1209,14 +1346,21 @@ def _retrieve_and_answer(session: Session, user_id: str, question: str, *, rag_d
             _log.warning("Unexpected RuntimeError in _retrieve_and_answer for "
                          "user_id=%s, refunding quota and returning 429", user_id,
                          exc_info=exc)
-        _refund_quota(session, user_id)
-        # Found live (third-pass code audit, finding #5): _consume_quota's
-        # increment is now committed durably up front (see answer_query), so
-        # without an equally durable commit here, THIS decrement would be the
-        # one silently lost to the rollback the RateLimited below triggers —
-        # inverting the bug instead of fixing it. Commit the refund before
-        # raising so the user doesn't lose a real question to an infra hiccup.
-        session.commit()
+        # Only refund what THIS request actually charged. On the
+        # condition-confirmation path the slot was paid by the earlier
+        # classify turn and redeemed via the pending marker, so refunding
+        # here would hand back a slot this request never took — a free
+        # question (and a free billed classify turn) for every upstream
+        # hiccup.
+        if charged:
+            _refund_quota(session, user_id)
+            # Found live (third-pass code audit, finding #5): _consume_quota's
+            # increment is now committed durably up front (see answer_query), so
+            # without an equally durable commit here, THIS decrement would be the
+            # one silently lost to the rollback the RateLimited below triggers —
+            # inverting the bug instead of fixing it. Commit the refund before
+            # raising so the user doesn't lose a real question to an infra hiccup.
+            session.commit()
         raise RateLimited(
             "The guidance service is busy right now. Please try again in a moment — "
             "this attempt was not counted against your daily questions.",
@@ -1349,6 +1493,15 @@ def _confirm_program_update(session: Session, user_id: str, confirmation: dict) 
     condition_codes = list(session.scalars(
         select(UserCondition.condition_code).where(UserCondition.user_id == user_id)
     ).all())
+    # Deliberately the SAFE-only list here, not merely "not avoided" — and
+    # deliberately stricter than what the program itself would admit. This
+    # path validates a CLIENT-SUPPLIED list against what the chat was ever
+    # allowed to name (_approved_activities uses the same safe-only rule), so
+    # anything outside it means the client sent something this server never
+    # offered — exactly what 16.3's re-verification exists to catch. See
+    # tests/test_rag_program_confirmation.py, which pins this behaviour.
+    # (_confirm_revert intentionally differs: its candidates are the user's
+    # OWN previously-active entries, which legitimately include `modify`.)
     approved_types = _approved_activity_types(session, condition_codes)
     safe_types = [a for a in activity_types if a in approved_types]
     if not safe_types:
@@ -1419,11 +1572,36 @@ def _confirm_revert(session: Session, user_id: str, confirmation: dict) -> dict:
         return {**base_response, "message": "No changes made.", "program_updated": False}
 
     currently_hidden = {h["activity_type"] for h in _hidden_by_sport_focus_change(session, user_id)}
-    safe_types = [a for a in activity_types if a in currently_hidden]
-    if not safe_types:
+    candidate_types = [a for a in activity_types if a in currently_hidden]
+    if not candidate_types:
         return {
             **base_response, "program_updated": False,
             "message": "Nothing to revert — those exercises aren't currently hidden.",
+        }
+
+    # 16.3 re-verify, don't trust a possibly-stale value: an exercise hidden
+    # by a sport-focus change can still have become unsafe since then (e.g. a
+    # condition added in between) — restore_program_activities itself does
+    # not check this (it's a generic "un-hide" used elsewhere), so the check
+    # has to happen here.
+    #
+    # The gate is "not avoided", NOT "in the safe list". Those are very
+    # different: the program admits everything the grid doesn't mark `avoid`
+    # (profile.service._blocked_activities), so `modify` activities are
+    # legitimately on a user's dashboard. Gating on the safe-only list would
+    # refuse to restore an exercise the user is perfectly entitled to have —
+    # e.g. a sprain_strain user has ELEVEN activities rated `modify` and zero
+    # `avoid`, so a safe-only gate would refuse all but Walking and this whole
+    # feature would appear broken to them.
+    condition_codes = list(session.scalars(
+        select(UserCondition.condition_code).where(UserCondition.user_id == user_id)
+    ).all())
+    avoided = _avoided_activity_types(session, condition_codes)
+    safe_types = [a for a in candidate_types if a not in avoided]
+    if not safe_types:
+        return {
+            **base_response, "program_updated": False,
+            "message": "Those exercises are no longer approved for your current conditions — nothing restored.",
         }
 
     result = restore_program_activities(session, user_id, safe_types)
@@ -1524,22 +1702,50 @@ def answer_query(session: Session, user_id: str, question: str, *, rag_db_url: s
     # symptom-sounding messages, each triggering 1-2 billed OpenRouter
     # calls, without ever spending a slot, bounded only by the generic
     # per-minute request throttle (not a cost control).
-    if not _consume_quota(session, user_id):
-        raise QuotaExhausted(
-            f"You've used all {DAILY_LIMIT} questions for today. Come back tomorrow, or "
-            "speak to a doctor if this feels urgent."
-        )
-    # Found live (third-pass code audit, finding #1/#5): the whole request runs
-    # inside ONE transaction (see routes.py's session_scope), which rolls back
-    # on ANY uncaught exception raised later — including a real, billed LLM
-    # failure this function doesn't even know how to anticipate. Without this
-    # commit, that rollback silently undoes the increment above too, so a
-    # user hitting any downstream failure gets a free, uncharged retry while
-    # the LLM call was already paid for — exactly the "counts no matter what"
-    # gap this counter was built to close. Committing here makes the charge
-    # durable immediately, before any LLM work is attempted; a later
-    # SQLAlchemy commit() only affects writes made AFTER this point.
-    session.commit()
+    # condition_confirmation is a continuation of the ORIGINAL question, not a
+    # new one — that question already paid for its slot below the first time
+    # it was sent (the classify-and-ask-which-condition turn). Charging again
+    # would make a symptom-sounding question cost 2 of the user's 5 daily
+    # slots instead of 1: one for being asked "which condition?", a second
+    # for actually getting answered once they tapped a choice.
+    #
+    # But that exemption must be PROVEN server-side, never taken on the
+    # client's word. The confirmation branch below runs a full, billed
+    # retrieve-and-answer, so trusting a client-supplied
+    # `condition_confirmation` field would let anyone get unlimited free LLM
+    # answers just by always including it. The marker below is set only when
+    # this server actually returned needs_condition_selection (having already
+    # charged for that turn), and deleting it is atomic, so it can be
+    # redeemed exactly once.
+    already_paid = False
+    if condition_confirmation is not None:
+        try:
+            already_paid = bool(
+                rc.durable().delete(rc.key_pending_condition_confirm(user_id))
+            )
+        except Exception:  # noqa: BLE001
+            # Redis unreachable: fall through to charging a slot. Wrong in the
+            # user's favour is a second slot spent; wrong the other way is
+            # free unlimited billed answers, so this must never fail open.
+            _log.warning("pending-condition marker unreadable for user %s", user_id)
+            already_paid = False
+    if not already_paid:
+        if not _consume_quota(session, user_id):
+            raise QuotaExhausted(
+                f"You've used all {DAILY_LIMIT} questions for today. Come back tomorrow, or "
+                "speak to a doctor if this feels urgent."
+            )
+        # Found live (third-pass code audit, finding #1/#5): the whole request runs
+        # inside ONE transaction (see routes.py's session_scope), which rolls back
+        # on ANY uncaught exception raised later — including a real, billed LLM
+        # failure this function doesn't even know how to anticipate. Without this
+        # commit, that rollback silently undoes the increment above too, so a
+        # user hitting any downstream failure gets a free, uncharged retry while
+        # the LLM call was already paid for — exactly the "counts no matter what"
+        # gap this counter was built to close. Committing here makes the charge
+        # durable immediately, before any LLM work is attempted; a later
+        # SQLAlchemy commit() only affects writes made AFTER this point.
+        session.commit()
 
     # A tap confirming (or declining) a condition suggested for THIS question.
     # 5.6: the model only ever suggests — recording a condition always requires
@@ -1563,6 +1769,9 @@ def answer_query(session: Session, user_id: str, question: str, *, rag_db_url: s
         return _retrieve_and_answer(
             session, user_id, question, rag_db_url=rag_db_url,
             openrouter_api_key=openrouter_api_key, rlm_enabled=rlm_enabled,
+            # If the pending marker paid for this turn, this request charged
+            # nothing — so there is nothing for a failure to refund.
+            charged=not already_paid,
         )
 
     # Fresh message: check whether it looks like an undiagnosed symptom
@@ -1582,6 +1791,17 @@ def answer_query(session: Session, user_id: str, question: str, *, rag_db_url: s
         )
     if matched_code:
         matched_label = next(o["label"] for o in options if o["code"] == matched_code)
+        # This turn charged a slot but returns no answer — mark that the
+        # follow-up confirmation is already paid for. Short TTL: it covers a
+        # user tapping a chip in the next few minutes, not a slot banked for
+        # tomorrow. Best-effort — if Redis is unavailable the confirmation
+        # simply charges its own slot (the old behaviour), never free.
+        try:
+            rc.durable().setex(
+                rc.key_pending_condition_confirm(user_id), PENDING_CONFIRM_TTL_SECONDS, "1"
+            )
+        except Exception:  # noqa: BLE001 — never fail the response over this
+            _log.warning("could not set pending-condition marker for user %s", user_id)
         return {
             "referred": False, "message": None, "answer": None,
             "needs_condition_selection": True,

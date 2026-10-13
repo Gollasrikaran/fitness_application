@@ -90,10 +90,22 @@ def test_weekly_progression_guard_clamp_is_logged(make_user, caplog):
 
     glute_bridge is reps-type, so at the default 2 sets its ceiling is the
     standard 30-reps-per-set ceiling (REPS_STANDARD_CEILING in service.py),
-    not taxonomy.max_amount — see _reps_cycle_ceiling."""
+    not taxonomy.max_amount — see _reps_cycle_ceiling.
+
+    Found live (test audit): the "curve" growth branch requires
+    days_logged >= MIN_LOGGED_DAYS_FOR_GROWTH (3) — see run_weekly_progression
+    — but this test only logged ONE day, so adherence was 100% yet
+    days_logged stayed at 1, always falling through to the "hold" branch
+    (raw_pct=0.0) instead of ever reaching the curve/clamp path at all. No
+    growth was ever attempted, so nothing was ever clamped, so the warning
+    this test checks for never fired — unrelated to any guard/clamp logic
+    itself. Logging on 3 distinct days (still well inside the 7-day
+    ADHERENCE_WINDOW_DAYS) satisfies the same gate run_weekly_progression
+    itself requires."""
     from datetime import datetime, timedelta, timezone
 
     from app.profile import service as profile_service
+    from app.profile.models import ActivityLog
 
     user = make_user()
     with session_scope() as s:
@@ -102,9 +114,16 @@ def test_weekly_progression_guard_clamp_is_logged(make_user, caplog):
         entry.target_sets = 2
         entry.target_amount = Decimal("28.00")  # volume=56, ceiling=30*2=60
         s.flush()
-        # 100% adherence so this lands in the curve-increase branch.
-        profile_service.log_activity(s, user["user_id"], activity_type=ACTIVITY,
-                                      amount=28, sets=2)
+        # 100% adherence on 3 distinct days so this lands in the
+        # curve-increase branch (MIN_LOGGED_DAYS_FOR_GROWTH).
+        today = profile_service.today_ist()
+        for i in range(3):
+            s.add(ActivityLog(
+                user_id=user["user_id"], activity_type=ACTIVITY, sets_done=2,
+                amount_per_set=28, unit="count", total_volume=56,
+                local_date=today - timedelta(days=i),
+            ))
+        s.flush()
         with caplog.at_level(logging.WARNING, logger="app.progression.service"):
             run_weekly_progression(s, user["user_id"])
     assert any(

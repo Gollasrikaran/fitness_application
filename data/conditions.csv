@@ -1,18 +1,29 @@
 condition_code,display_name,bucket,display_order,notes
 none,None of these,supported,10,Standard program. No exclusions applied.
-chronic_back_pain,Chronic back pain,supported,20,
-herniated_disk,Herniated disc,supported,30,
-degenerative_disc,Degenerative disc disease,supported,40,
-spinal_stenosis,Spinal stenosis,supported,50,
-spondylosis,Spondylosis,supported,60,
-arthritis_hip,Hip arthritis,supported,70,
-bursitis,Bursitis,supported,80,
-carpal_tunnel,Carpal tunnel syndrome,supported,90,
-sprain_strain,Sprain or strain,supported,100,
-gout,Gout,supported,110,
-heart_condition,Heart condition,refer,900,Any cardiac diagnosis. Exercise guidance requires clinical supervision.
-pregnancy,Pregnant or recently postpartum,refer,910,Different guidance entirely; out of scope for this product.
-recent_surgery,Recent surgery,refer,920,
-acute_injury,Acute or unhealed injury,refer,930,
-neurological,Neurological condition,refer,940,Multiple sclerosis, neuropathy, and similar.
+chronic_back_pain,Long-standing back pain,supported,20,
+herniated_disk,Slip disc,supported,30,
+degenerative_disc,Disc wear and tear,supported,40,
+spinal_stenosis,Nerve pinching in the spine,supported,50,
+spondylosis,Neck or back stiffness,supported,60,
+arthritis_hip,Hip joint pain,supported,70,
+bursitis,Joint swelling,supported,80,
+carpal_tunnel,Wrist pain,supported,90,
+sprain_strain,Sprain / pulled muscle,supported,100,
+gout,Uric acid problem,supported,110,
+prediabetes,Prediabetes,supported,115,No specific exercise restriction identified; general fitness activity is protective.
+high_cholesterol,Cholesterol problem,supported,120,No specific exercise restriction identified.
+obesity,Overweight,supported,125,Favor lower-impact activity while building fitness; see safety grid for running.
+arthritis_knee,Knee pain,supported,130,Favor lower-impact activity; avoid deep knee flexion under load.
+pcos,PCOD,supported,135,No specific exercise restriction identified.
+depression,Feeling low,supported,140,No physical exercise restriction identified.
+anxiety,Tension,supported,145,No physical exercise restriction identified.
+diabetes_controlled,Sugar under control,supported,150,Diabetes managed with medicine/diet and no known complications. Favor lower-impact activity; avoid sudden intense exertion.
+bp_controlled,BP under control,supported,155,High blood pressure managed with medicine. Favor lower-impact activity; avoid sudden intense exertion.
+diabetes,Sugar not under control,refer,901,"Safety depends on control status and complications (eye/foot/nerve) that a single checkbox cannot capture — refer to a doctor."
+high_bp,BP not under control,refer,903,"Uncontrolled blood pressure with intense exertion carries real risk — refer to a doctor."
+heart_condition,Heart problem,refer,900,Any cardiac diagnosis. Exercise guidance requires clinical supervision.
+pregnancy,Pregnant / recently had a baby,refer,910,Different guidance entirely; out of scope for this product.
+recent_surgery,Had an operation recently,refer,920,
+acute_injury,Fresh injury (still healing),refer,930,
+neurological,Nerve-related problem,refer,940,"Multiple sclerosis, neuropathy, and similar."
 other_unlisted,Something else / not listed,refer,999,FAIL-CLOSED DEFAULT. Do not remove this row.

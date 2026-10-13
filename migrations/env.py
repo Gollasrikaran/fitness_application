@@ -53,6 +53,23 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+# rag_chunks lives in this same database today but is created and owned by
+# scripts/dev_tools/setup_rag_schema.py, not by any SQLAlchemy model — it was
+# meant to live in a separate Supabase project (STRATEGY §5: "the vector store
+# stays out of the primary datastore's blast radius"), but currently shares
+# this DATABASE_URL. Because it's absent from Base.metadata, autogenerate sees
+# it as "a table that shouldn't be here" and will happily emit
+# op.drop_table('rag_chunks') the next time anyone runs --autogenerate — which
+# would delete the entire embedded RAG corpus. Excluding it here is the
+# backstop until the two databases are actually split apart.
+_IGNORED_TABLES = {"rag_chunks"}
+
+
+def include_object(object, name, type_, reflected, compare_to):
+    if type_ == "table" and name in _IGNORED_TABLES:
+        return False
+    return True
+
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
@@ -76,6 +93,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -106,7 +124,8 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection, target_metadata=target_metadata,
+            include_object=include_object,
         )
 
         with context.begin_transaction():
