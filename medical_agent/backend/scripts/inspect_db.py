@@ -24,14 +24,12 @@ TABLES = """select table_name from information_schema.tables
 COLUMNS = """select column_name, data_type, is_nullable, column_default
              from information_schema.columns
              where table_schema = 'public' and table_name = %s order by ordinal_position"""
+# pg_constraint rather than information_schema: the latter hides constraints
+# whose tables the session doesn't own, which can happen through Supabase's pooler.
 FOREIGN_KEYS = """
-    select tc.table_name, kcu.column_name, ccu.table_name, ccu.column_name
-    from information_schema.table_constraints tc
-    join information_schema.key_column_usage kcu
-      on tc.constraint_name = kcu.constraint_name and tc.table_schema = kcu.table_schema
-    join information_schema.constraint_column_usage ccu
-      on tc.constraint_name = ccu.constraint_name and tc.table_schema = ccu.table_schema
-    where tc.constraint_type = 'FOREIGN KEY' and tc.table_schema = 'public' order by 1, 2"""
+    select conrelid::regclass::text, pg_get_constraintdef(oid)
+    from pg_constraint
+    where contype = 'f' and connamespace = 'public'::regnamespace order by 1, 2"""
 
 # prepare_threshold=None: needed behind Supabase's connection pooler (port 6543).
 with psycopg.connect(url, connect_timeout=10, prepare_threshold=None) as conn:
@@ -45,5 +43,5 @@ with psycopg.connect(url, connect_timeout=10, prepare_threshold=None) as conn:
             flags = ("" if nullable == "YES" else "NOT NULL") + (f"  default={default[:30]}" if default else "")
             print(f"   {name:<28} {dtype:<26} {flags}")
     print("\n== foreign keys")
-    for src_table, src_col, dst_table, dst_col in conn.execute(FOREIGN_KEYS):
-        print(f"   {src_table}.{src_col} -> {dst_table}.{dst_col}")
+    for table, definition in conn.execute(FOREIGN_KEYS):
+        print(f"   {table}: {definition}")

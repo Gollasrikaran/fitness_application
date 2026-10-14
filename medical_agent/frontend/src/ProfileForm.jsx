@@ -6,6 +6,7 @@ export default function ProfileForm({ onSaved, onCancel }) {
   const [form, setForm] = useState({ age: "", sex: "female", height_cm: "", weight_kg: "", experience: "beginner" });
   const [picked, setPicked] = useState([]);
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     api("GET", "/conditions").then(setConditions);
@@ -23,6 +24,7 @@ export default function ProfileForm({ onSaved, onCancel }) {
   async function submit(e) {
     e.preventDefault();
     setError("");
+    setSaving(true);
     try {
       await api("PUT", "/profile", {
         ...form,
@@ -33,7 +35,9 @@ export default function ProfileForm({ onSaved, onCancel }) {
       });
       onSaved();
     } catch (err) {
-      setError(err.message);
+      setError(err.message === "Failed to fetch" ? "Can't reach the server. Is the backend running?" : err.message);
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -60,11 +64,11 @@ export default function ProfileForm({ onSaved, onCancel }) {
         </label>
         <label>
           Height (cm)
-          <input type="number" value={form.height_cm} onChange={set("height_cm")} />
+          <input type="number" step="any" min="100" max="250" value={form.height_cm} onChange={set("height_cm")} />
         </label>
         <label>
           Weight (kg)
-          <input type="number" value={form.weight_kg} onChange={set("weight_kg")} />
+          <input type="number" step="any" min="25" max="300" value={form.weight_kg} onChange={set("weight_kg")} />
         </label>
         <label>
           Activity level
@@ -93,7 +97,7 @@ export default function ProfileForm({ onSaved, onCancel }) {
       <p className="muted small">Leave everything unticked if none apply.</p>
       {error && <p className="error">{error}</p>}
       <div className="actions">
-        <button className="primary">Save</button>
+        <button className="primary" disabled={saving}>{saving ? "Saving…" : "Save"}</button>
         {onCancel && (
           <button type="button" className="link" onClick={onCancel}>
             Cancel

@@ -32,3 +32,13 @@ def test_es256_tokens_verified_with_project_jwks(client, monkeypatch):
     other = ec.generate_private_key(ec.SECP256R1())  # signed by someone else's key
     bad = client.get("/auth/me", headers={"Authorization": f"Bearer {_es256_token(other)}"})
     assert bad.status_code == 401
+
+
+def test_unreachable_supabase_is_503_not_401(client, monkeypatch):
+    class _Down:
+        def get_signing_key_from_jwt(self, token):
+            raise jwt.PyJWKClientConnectionError("timed out")
+    monkeypatch.setattr(auth, "_jwks_client", lambda: _Down())
+    key = ec.generate_private_key(ec.SECP256R1())
+    r = client.get("/auth/me", headers={"Authorization": f"Bearer {_es256_token(key)}"})
+    assert r.status_code == 503 and "login server" in r.json()["detail"]

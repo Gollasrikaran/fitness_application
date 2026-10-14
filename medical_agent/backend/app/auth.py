@@ -6,6 +6,7 @@ can't promote themselves by editing their Supabase profile.
 """
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 
 import jwt
@@ -17,6 +18,8 @@ from app.config import settings
 from app.db import get_db
 from app.models import User
 
+log = logging.getLogger("medical_agent.auth")
+
 _bearer = HTTPBearer(auto_error=False)
 AUDIENCE = "authenticated"  # what Supabase puts in tokens for signed-in users
 
@@ -25,7 +28,8 @@ AUDIENCE = "authenticated"  # what Supabase puts in tokens for signed-in users
 def _jwks_client() -> jwt.PyJWKClient:
     if not settings.supabase_url:
         raise RuntimeError("SUPABASE_URL is not set")
-    # Public signing keys; PyJWKClient caches them and refetches on rotation.
+    # Public signing keys. Cached client (lru_cache) so keys aren't re-downloaded
+    # on every request; PyJWKClient refetches on its own when a new key id appears.
     return jwt.PyJWKClient(f"{settings.supabase_url}/auth/v1/.well-known/jwks.json", cache_keys=True)
 
 
@@ -51,7 +55,13 @@ def current_user(creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not logged in")
     try:
         claims = verify_token(creds.credentials)
-    except (jwt.PyJWTError, RuntimeError):
+    except jwt.PyJWKClientConnectionError as exc:
+        # Couldn't download Supabase's signing keys: a network problem, not a bad login.
+        log.error("Can't reach Supabase to verify a login: %s", exc)
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "Can't reach the login server right now. Check your internet connection and try again.")
+    except (jwt.PyJWTError, RuntimeError) as exc:
+        log.info("Login token rejected: %s", exc.__class__.__name__)  # never log the token itself
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session expired, please log in again")
 
     user = db.get(User, claims["sub"])

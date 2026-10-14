@@ -17,12 +17,18 @@ export default function PatientHome() {
   const endRef = useRef(null);
 
   const refresh = () =>
-    Promise.all([api("GET", "/chat").then(setMessages), api("GET", "/agent/context").then(setContext)]);
+    Promise.all([api("GET", "/chat").then(setMessages), api("GET", "/agent/context").then(setContext)]).catch(
+      (err) => setError(`Couldn't load your data: ${err.message}`)
+    );
 
   useEffect(() => {
     refresh();
   }, []);
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), [messages, busy]);
+  useEffect(() => {
+    // Braces matter: newer browsers return a Promise from scrollIntoView, and an
+    // effect must return nothing or a cleanup function, or React crashes.
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, busy]);
 
   async function send(e) {
     e.preventDefault();
