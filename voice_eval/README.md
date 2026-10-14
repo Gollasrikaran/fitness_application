@@ -9,8 +9,11 @@ keyterm hints.
 1. `copy voice_eval\.env.example voice_eval\.env` and add the API keys.
 2. `copy voice_eval\references.example.csv voice_eval\references.csv`, then
    replace the example rows with your real clips.
-3. Put the audio files in `voice_eval/recordings/`. WAV, MP3 and M4A all work.
-   For non-WAV files, cost only shows if `ffprobe` (part of ffmpeg) is installed.
+3. Put the audio files in `voice_eval/recordings/`. Any format works if
+   ffmpeg is installed (`scoop install ffmpeg`): every non-WAV clip is
+   converted once to 16 kHz mono WAV in `recordings/_converted/`, so all
+   models get identical audio. Phone recorders' raw `.aac` files are rejected
+   by Sarvam unless converted.
 
 `recordings/`, `references.csv` and `results/` are gitignored because they hold
 team members' voices.

@@ -28,11 +28,36 @@ from voice_eval.scoring import key_term_hits, wer
 
 ROOT = Path(__file__).resolve().parent
 RECORDINGS = ROOT / "recordings"
+CONVERTED = RECORDINGS / "_converted"   # inside recordings/, so gitignored with it
 REFERENCES = ROOT / "references.csv"
 RESULTS = ROOT / "results"
 
 # The group whose misses rule a model out (decision rule in the evaluation plan).
 WARNING_GROUP = "warning"
+
+
+def prepare_audio(path: Path) -> Path:
+    """Every provider gets the same 16 kHz mono WAV, converted once and cached.
+
+    Phone recorders save formats some APIs reject (raw ADTS .aac from Android
+    recorders: Sarvam answers "Invalid audio file"), and 16 kHz mono is what
+    Sarvam documents as most accurate. Converting for everyone keeps the
+    comparison fair. Needs ffmpeg on PATH; WAV files pass through untouched.
+    """
+    if path.suffix.lower() == ".wav":
+        return path
+    if not shutil.which("ffmpeg"):
+        sys.exit(f"{path.name} isn't WAV and ffmpeg isn't installed to convert it. "
+                 "Install it (`scoop install ffmpeg`) or record as WAV.")
+    out = CONVERTED / (path.stem + ".wav")
+    if not out.exists() or out.stat().st_mtime < path.stat().st_mtime:
+        CONVERTED.mkdir(exist_ok=True)
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "fatal", "-i", str(path),
+             "-ac", "1", "-ar", "16000", str(out)],
+            check=True,
+        )
+    return out
 
 
 def audio_seconds(path: Path) -> float | None:
@@ -86,7 +111,7 @@ def main() -> None:
     rows = []
     for provider in providers:
         for ref in refs:
-            path = RECORDINGS / ref["clip"]
+            path = prepare_audio(RECORDINGS / ref["clip"])
             seconds = audio_seconds(path)
             start = time.perf_counter()
             transcript, error = "", ""

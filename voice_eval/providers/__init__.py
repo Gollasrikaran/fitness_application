@@ -49,6 +49,14 @@ def build_providers(language_code: str = "unknown") -> dict[str, Provider]:
             lambda p, k: sarvam.transcribe(p, api_key=k, model="saaras:v3", mode="codemix",
                                            language_code=language_code),
         ),
+        # Everything in Roman script ("kamar mein dard"): directly comparable
+        # to our Roman references, and the form a rule-based parser or the
+        # voice-extraction LLM is most likely to handle.
+        "sarvam-v3-translit": Provider(
+            "sarvam-v3-translit", "SARVAM_API_KEY", sarvam_usd,
+            lambda p, k: sarvam.transcribe(p, api_key=k, model="saaras:v3", mode="translit",
+                                           language_code=language_code),
+        ),
     }
 
 

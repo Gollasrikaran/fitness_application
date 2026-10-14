@@ -15,6 +15,15 @@ import requests
 URL = "https://api.sarvam.ai/speech-to-text"
 INR_PER_AUDIO_HOUR = 30.0
 
+# Explicit, because mimetypes reads the Windows registry and returns oddities
+# like "audio/vnd.dlna.adts" for .aac that an API may not recognise.
+AUDIO_TYPES = {
+    ".wav": "audio/wav", ".mp3": "audio/mpeg", ".aac": "audio/aac",
+    ".m4a": "audio/mp4", ".mp4": "audio/mp4", ".ogg": "audio/ogg",
+    ".opus": "audio/opus", ".flac": "audio/flac", ".webm": "audio/webm",
+    ".amr": "audio/amr",
+}
+
 
 def transcribe(path: Path, *, api_key: str, model: str, mode: str | None = None,
                language_code: str = "unknown", keyterms: list[str] | None = None,
@@ -31,7 +40,8 @@ def transcribe(path: Path, *, api_key: str, model: str, mode: str | None = None,
         # toward these words but doesn't force them into the output.
         data["keyterms"] = json.dumps(keyterms[:50])
 
-    content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    content_type = (AUDIO_TYPES.get(path.suffix.lower())
+                    or mimetypes.guess_type(path.name)[0] or "application/octet-stream")
     with path.open("rb") as f:
         resp = requests.post(
             URL,
