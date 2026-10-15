@@ -10,8 +10,8 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import (Case, ChatMessage, Condition, DoctorPlan, Exercise, MemoryNote, ProgressLog,
-                        SafetyRule, User)
+from app.models import (Case, ChatMessage, Condition, DoctorPlan, Exercise, MemoryNote, PlanProposal,
+                        ProgressLog, SafetyRule, User)
 
 # Progress signals that send a case to a doctor without asking the LLM.
 PAIN_HIGH = 8          # any session this week at or above this
@@ -106,6 +106,15 @@ def latest_plan(db: Session, user_id: str) -> dict | None:
             "doctor": plan.doctor.name, "given_on": plan.created_at.date().isoformat()}
 
 
+def pending_plan(db: Session, user_id: str) -> dict | None:
+    """A drafted plan still waiting for the doctor (not yet the patient's to follow)."""
+    p = db.scalars(select(PlanProposal).where(PlanProposal.user_id == user_id, PlanProposal.status == "pending")
+                   .order_by(PlanProposal.created_at.desc()).limit(1)).first()
+    if p is None:
+        return None
+    return {"id": p.id, "kind": p.kind, "requested_on": p.created_at.date().isoformat()}
+
+
 def open_case(db: Session, user_id: str) -> Case | None:
     return db.scalars(select(Case).where(Case.user_id == user_id, Case.status == "open")
                       .order_by(Case.created_at.desc()).limit(1)).first()
@@ -143,6 +152,7 @@ def build_context(db: Session, user: User, today: date | None = None) -> dict:
         "memory": [n.note for n in reversed(notes)],
         "open_case": case_dict(open_case(db, user.id)),
         "doctor_plan": latest_plan(db, user.id),
+        "pending_plan": pending_plan(db, user.id),
     }
 
 

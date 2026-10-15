@@ -89,3 +89,18 @@ button.link { background: none; border: 0; color: var(--primary); cursor: pointe
   .msg { max-width: 95%; }
 }
 .switch { text-align: center; margin-top: 4px; }
+
+/* Doctor portal: cases vs plan reviews */
+.views { display: flex; gap: 6px; margin-bottom: 4px; }
+.view { flex: 1; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 6px 10px; cursor: pointer; font-weight: 600; }
+.view.on { background: #eaf2ff; border-color: var(--primary); color: var(--primary); }
+.count { display: inline-block; margin-left: 6px; min-width: 18px; padding: 0 6px; border-radius: 999px; background: var(--bad); color: #fff; font-size: 12px; }
+.reject { margin-top: 12px; align-items: center; }
+.reject input { flex: 3; }
+button.danger { color: var(--bad); flex: 0; }
+button:disabled.link { opacity: 0.4; cursor: default; }
+
+/* Patient: "too hard" request */
+.too-hard { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.check { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
+.check input { width: auto; }

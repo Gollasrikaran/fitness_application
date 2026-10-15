@@ -28,7 +28,7 @@ class FakeLLM:
 
     def __init__(self):
         self.response = {"decision": "self_care", "reply": "Gentle movement should help.", "reason": "minor",
-                         "pain_score": None, "suggested_exercises": [], "urgency": "routine",
+                         "pain_score": None, "urgency": "routine",
                          "doctor_summary": None, "new_facts": []}
         self.calls: list[list[dict]] = []
         self.fail = False

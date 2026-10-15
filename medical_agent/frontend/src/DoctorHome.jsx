@@ -1,7 +1,36 @@
 import { useEffect, useState } from "react";
 import { api } from "./api.js";
+import { ExerciseRows, PatientFacts, PlanExercises, ProgressTable, toPayload } from "./doctorParts.jsx";
+import PlanReviews from "./PlanReviews.jsx";
 
 export default function DoctorHome() {
+  const [view, setView] = useState("cases");
+  const [pending, setPending] = useState(0);
+
+  useEffect(() => {
+    const load = () =>
+      api("GET", "/doctor/proposals")
+        .then((rows) => setPending(rows.length))
+        .catch(() => {});
+    load();
+    const t = setInterval(load, 15000);
+    return () => clearInterval(t);
+  }, [view]);
+
+  const switcher = (
+    <div className="views">
+      <button className={view === "cases" ? "view on" : "view"} onClick={() => setView("cases")}>
+        Cases
+      </button>
+      <button className={view === "plans" ? "view on" : "view"} onClick={() => setView("plans")}>
+        Plan reviews{pending > 0 && <span className="count">{pending}</span>}
+      </button>
+    </div>
+  );
+  return view === "cases" ? <Cases switcher={switcher} /> : <PlanReviews switcher={switcher} />;
+}
+
+function Cases({ switcher }) {
   const [status, setStatus] = useState("open");
   const [cases, setCases] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -16,6 +45,7 @@ export default function DoctorHome() {
   return (
     <div className="doctor">
       <aside className="card queue">
+        {switcher}
         <div className="tabs">
           {["open", "plan_given", "closed", "all"].map((s) => (
             <button key={s} className={s === status ? "tab on" : "tab"} onClick={() => setStatus(s)}>
@@ -59,7 +89,6 @@ function CaseDetail({ id, onChanged }) {
   if (!c) return <p className="muted">Loading…</p>;
 
   const ctx = c.patient_context;
-  const p = ctx.patient;
   return (
     <>
       <div className="card">
@@ -67,11 +96,8 @@ function CaseDetail({ id, onChanged }) {
           <h2>{c.patient}</h2>
           <span className={`badge ${c.urgency}`}>{c.urgency}</span>
         </div>
-        <div className="small muted">
-          {p.age} y · {p.sex} · {p.height_cm ?? "?"} cm · {p.weight_kg ?? "?"} kg
-          {p.bmi && ` · BMI ${p.bmi}`} · {p.experience} · status: {c.status.replace("_", " ")}
-        </div>
-        <div className="small">Conditions: {ctx.conditions.map((x) => x.name).join(", ") || "none"}</div>
+        <PatientFacts ctx={ctx} />
+        <div className="small muted">Status: {c.status.replace("_", " ")}</div>
         <h3>Why it was escalated</h3>
         <p>{c.reason}</p>
         <h3>Assistant's summary</h3>
@@ -109,11 +135,7 @@ function CaseDetail({ id, onChanged }) {
         <div key={pl.id} className="card">
           <h3>Plan given by Dr. {pl.doctor}</h3>
           <p className="pre">{pl.instructions}</p>
-          {pl.exercises.map((e, i) => (
-            <div key={i} className="small">
-              • {e.name}: {e.sets} × {e.amount} {e.unit} {e.notes && `(${e.notes})`}
-            </div>
-          ))}
+          <PlanExercises exercises={pl.exercises} />
         </div>
       ))}
       {c.status !== "closed" && (
@@ -130,61 +152,16 @@ function CaseDetail({ id, onChanged }) {
   );
 }
 
-function ProgressTable({ progress }) {
-  const rows = [
-    ["Active days", progress.last_week.active_days, progress.this_week.active_days],
-    ["Average pain", progress.last_week.pain_avg ?? "–", progress.this_week.pain_avg ?? "–"],
-    ["Highest pain", progress.last_week.pain_max ?? "–", progress.this_week.pain_max ?? "–"],
-  ];
-  return (
-    <>
-      <table>
-        <thead>
-          <tr>
-            <th />
-            <th>Last week</th>
-            <th>This week</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(([label, a, b]) => (
-            <tr key={label}>
-              <td>{label}</td>
-              <td>{a}</td>
-              <td>{b}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {progress.signals.map((s) => (
-        <div key={s.code} className={`small ${s.escalate ? "error" : "muted"}`}>
-          {s.text}
-        </div>
-      ))}
-    </>
-  );
-}
-
 function PlanForm({ caseId, approved, onDone }) {
-  const [all, setAll] = useState([]);
   const [instructions, setInstructions] = useState("");
   const [rows, setRows] = useState([]);
   const [error, setError] = useState("");
-  useEffect(() => {
-    api("GET", "/exercises").then(setAll);
-  }, []);
-  const safe = new Set(approved.map((e) => e.activity_type));
-
-  const update = (i, k, v) => setRows(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
 
   async function submit(e) {
     e.preventDefault();
     setError("");
     try {
-      await api("POST", `/doctor/cases/${caseId}/plan`, {
-        instructions,
-        exercises: rows.map((r) => ({ ...r, sets: Number(r.sets), amount: Number(r.amount) })),
-      });
+      await api("POST", `/doctor/cases/${caseId}/plan`, { instructions, exercises: toPayload(rows) });
       setInstructions("");
       setRows([]);
       onDone();
@@ -208,39 +185,7 @@ function PlanForm({ caseId, approved, onDone }) {
         placeholder="Advice and instructions for the patient"
         required
       />
-      {rows.map((r, i) => (
-        <div key={i} className="row plan-row">
-          <select value={r.activity_type} onChange={(e) => update(i, "activity_type", e.target.value)} required>
-            <option value="">Exercise…</option>
-            {all.map((x) => (
-              <option key={x.activity_type} value={x.activity_type}>
-                {x.name} ({x.unit}){safe.has(x.activity_type) ? "" : " – not in safety grid"}
-              </option>
-            ))}
-          </select>
-          <input type="number" min="1" value={r.sets} onChange={(e) => update(i, "sets", e.target.value)} title="Sets" />
-          <input
-            type="number"
-            min="0.1"
-            step="any"
-            value={r.amount}
-            onChange={(e) => update(i, "amount", e.target.value)}
-            placeholder="Amount"
-            required
-          />
-          <input value={r.notes} onChange={(e) => update(i, "notes", e.target.value)} placeholder="Notes" />
-          <button type="button" className="link" onClick={() => setRows(rows.filter((_, j) => j !== i))}>
-            Remove
-          </button>
-        </div>
-      ))}
-      <button
-        type="button"
-        className="link"
-        onClick={() => setRows([...rows, { activity_type: "", sets: 1, amount: "", notes: "" }])}
-      >
-        + Add exercise
-      </button>
+      <ExerciseRows rows={rows} setRows={setRows} approved={approved} />
       {error && <p className="error">{error}</p>}
       <div className="actions">
         <button className="primary">Send plan to patient</button>

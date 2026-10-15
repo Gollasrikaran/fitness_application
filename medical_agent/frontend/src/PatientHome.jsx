@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api.js";
 
+const PENDING_TEXT = {
+  starter: "Your first exercise plan is being prepared. A doctor on our team checks every plan before you start, so please wait for it.",
+  easier: "The easier plan you asked for is with your doctor. Until it's approved, keep to your current plan or rest if something hurts.",
+  update: "Your plan is being updated for your health conditions. A doctor will review it before it changes.",
+};
+
 const DECISION_LABEL = {
   self_care: "Self-care advice",
   clarify: "Needs a bit more info",
@@ -110,7 +116,7 @@ function Message({ m }) {
 }
 
 function Sidebar({ context, onLogged }) {
-  const { progress, conditions, doctor_plan, open_case, memory } = context;
+  const { progress, conditions, doctor_plan, pending_plan, open_case, memory } = context;
   const tw = progress.this_week;
   const lw = progress.last_week;
   return (
@@ -121,6 +127,13 @@ function Sidebar({ context, onLogged }) {
           <div className="small">
             Opened {open_case.opened_on} · {open_case.urgency}
           </div>
+        </div>
+      )}
+      {pending_plan && (
+        <div className="card notice routine">
+          <strong>Waiting for your doctor</strong>
+          <div className="small">{PENDING_TEXT[pending_plan.kind]}</div>
+          <div className="small muted">Requested {pending_plan.requested_on}</div>
         </div>
       )}
       {doctor_plan && (
@@ -135,6 +148,7 @@ function Sidebar({ context, onLogged }) {
               • {e.name}: {e.sets} × {e.amount} {e.unit} {e.notes && `(${e.notes})`}
             </div>
           ))}
+          {!pending_plan && doctor_plan.exercises.length > 0 && <TooHard plan={doctor_plan} onDone={onLogged} />}
         </div>
       )}
       <div className="card">
@@ -154,7 +168,7 @@ function Sidebar({ context, onLogged }) {
           </div>
         ))}
       </div>
-      <LogForm exercises={context.approved_exercises} onLogged={onLogged} />
+      <LogForm exercises={doctor_plan?.exercises || []} onLogged={onLogged} />
       <div className="card">
         <h3>Your conditions</h3>
         <div className="small">
@@ -200,9 +214,9 @@ function LogForm({ exercises, onLogged }) {
   useEffect(() => {
     api("GET", "/exercises").then(setAll);
   }, []);
-  // Approved exercises first; the rest are still loggable (e.g. from a doctor's plan).
-  const approved = new Set(exercises.map((e) => e.activity_type));
-  const options = [...all].sort((a, b) => approved.has(b.activity_type) - approved.has(a.activity_type));
+  // The doctor's plan first; anything else is still loggable.
+  const inPlan = new Set(exercises.map((e) => e.activity_type));
+  const options = [...all].sort((a, b) => inPlan.has(b.activity_type) - inPlan.has(a.activity_type));
   const current = all.find((e) => e.activity_type === form.activity_type);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
@@ -232,7 +246,7 @@ function LogForm({ exercises, onLogged }) {
         {options.map((e) => (
           <option key={e.activity_type} value={e.activity_type}>
             {e.name}
-            {approved.has(e.activity_type) ? "" : " (not in your safe list)"}
+            {inPlan.has(e.activity_type) ? "" : " (not in your plan)"}
           </option>
         ))}
       </select>
@@ -252,6 +266,73 @@ function LogForm({ exercises, onLogged }) {
       </div>
       <button className="primary">Log</button>
       {msg && <span className="small muted"> {msg}</span>}
+    </form>
+  );
+}
+
+function TooHard({ plan, onDone }) {
+  const [open, setOpen] = useState(false);
+  const [picked, setPicked] = useState([]);
+  const [pain, setPain] = useState("");
+  const [note, setNote] = useState("");
+  const [msg, setMsg] = useState("");
+
+  const toggle = (a) => setPicked(picked.includes(a) ? picked.filter((x) => x !== a) : [...picked, a]);
+
+  async function submit(e) {
+    e.preventDefault();
+    setMsg("");
+    try {
+      const out = await api("POST", "/plans/too-hard", {
+        activity_types: picked,
+        pain_level: pain === "" ? null : Number(pain),
+        note: note.trim() || null,
+      });
+      setOpen(false);
+      setPicked([]);
+      setPain("");
+      setNote("");
+      setMsg(
+        out.status === "doctor_case"
+          ? "Because of the pain, a doctor will look at this. Please rest and avoid movements that hurt."
+          : "Thanks. Your doctor will review an easier plan for you."
+      );
+      onDone();
+    } catch (err) {
+      setMsg(err.message);
+    }
+  }
+
+  if (!open)
+    return (
+      <>
+        <button className="link" onClick={() => setOpen(true)}>
+          Is this plan too hard?
+        </button>
+        {msg && <div className="small muted">{msg}</div>}
+      </>
+    );
+  return (
+    <form className="too-hard" onSubmit={submit}>
+      <div className="small muted">Which exercises are too hard? Leave all unticked if it's all of them.</div>
+      {plan.exercises.map((e) => (
+        <label key={e.activity_type} className="check">
+          <input type="checkbox" checked={picked.includes(e.activity_type)} onChange={() => toggle(e.activity_type)} />
+          {e.name}
+        </label>
+      ))}
+      <label>
+        Pain while doing them (0–10, optional)
+        <input type="number" min="0" max="10" value={pain} onChange={(e) => setPain(e.target.value)} />
+      </label>
+      <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything else? (optional)" maxLength={1000} />
+      {msg && <div className="small error">{msg}</div>}
+      <div className="actions">
+        <button className="primary">Ask for an easier plan</button>
+        <button type="button" className="link" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
     </form>
   );
 }

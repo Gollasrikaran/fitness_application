@@ -41,6 +41,9 @@ class Exercise(Base):
     default_sets: Mapped[int] = mapped_column(Integer, default=1)
     default_amount: Mapped[float] = mapped_column(Float, default=1)
     per_side: Mapped[bool] = mapped_column(default=False)
+    # How much one step easier or harder is, in amount_unit (e.g. 2 reps, 0.2 km).
+    progression_step: Mapped[float] = mapped_column(Float, default=1)
+    priority_order: Mapped[int] = mapped_column(Integer, default=0)  # tiebreak after usefulness_rank
 
 
 class SafetyRule(Base):
@@ -51,6 +54,8 @@ class SafetyRule(Base):
     activity_type: Mapped[str] = mapped_column(ForeignKey("exercises.activity_type"))
     verdict: Mapped[str] = mapped_column(String(8))  # safe | modify | avoid
     note: Mapped[str] = mapped_column(Text, default="")
+    # 1 = most useful for this condition; empty on "avoid" rows.
+    usefulness_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 # ── Users ───────────────────────────────────────────────────────────────────
@@ -147,9 +152,13 @@ class Case(Base):
 
 
 class DoctorPlan(Base):
+    """A plan the patient follows. Every row was written or approved by a
+    doctor; drafts waiting for review live in PlanProposal."""
     __tablename__ = "doctor_plans"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    case_id: Mapped[str] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    # Empty for plans approved from a proposal outside any case.
+    case_id: Mapped[str | None] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), index=True,
+                                                nullable=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     doctor_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     instructions: Mapped[str] = mapped_column(Text)
@@ -158,5 +167,34 @@ class DoctorPlan(Base):
     exercises: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
-    case: Mapped[Case] = relationship(back_populates="plans")
+    case: Mapped[Case | None] = relationship(back_populates="plans")
     doctor: Mapped[User] = relationship(foreign_keys=[doctor_id])
+
+
+class PlanProposal(Base):
+    """A plan drafted for a doctor to review. Nothing here reaches the patient
+    until a doctor approves it, which copies it into DoctorPlan.
+
+    source: "rules" (built by app.agent.plans, no AI) | "doctor" (the rules
+    can't draft one, e.g. a refer condition, so the doctor writes it).
+    """
+    __tablename__ = "plan_proposals"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))  # starter | easier | update
+    source: Mapped[str] = mapped_column(String(16))  # rules | doctor
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending | approved | rejected | superseded
+    instructions: Mapped[str] = mapped_column(Text)
+    exercises: Mapped[list] = mapped_column(JSON, default=list)  # same shape as DoctorPlan.exercises
+    # For "easier": [{activity_type, name, from: {sets, amount}, to: {sets, amount}, note}]
+    changes: Mapped[list] = mapped_column(JSON, default=list)
+    reason: Mapped[str] = mapped_column(Text)  # why it was drafted, for the doctor
+    patient_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    based_on_plan_id: Mapped[str | None] = mapped_column(ForeignKey("doctor_plans.id"), nullable=True)
+    approved_plan_id: Mapped[str | None] = mapped_column(ForeignKey("doctor_plans.id"), nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    user: Mapped[User] = relationship(foreign_keys=[user_id])

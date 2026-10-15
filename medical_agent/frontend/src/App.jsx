@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./api.js";
-import { supabase, supabaseConfigured } from "./supabase.js";
+import { signOut, supabase, supabaseConfigured } from "./supabase.js";
 import Auth, { SetNewPassword } from "./Auth.jsx";
 import ProfileForm from "./ProfileForm.jsx";
 import PatientHome from "./PatientHome.jsx";
@@ -35,7 +35,7 @@ export default function App() {
     api("GET", "/auth/me")
       .then(async (me) => {
         if (me.role !== PORTAL) {
-          await supabase.auth.signOut();
+          await signOut();
           setPortalError(
             PORTAL === "doctor"
               ? "This is not a doctor account. Patients log in at the patient app."
@@ -80,7 +80,7 @@ export default function App() {
             Edit profile
           </button>
         )}
-        <button className="link" onClick={() => supabase.auth.signOut()}>
+        <button className="link" onClick={signOut}>
           Log out
         </button>
       </header>

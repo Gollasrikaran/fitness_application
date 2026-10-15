@@ -1,4 +1,4 @@
-"""Patient-facing routes: profile, progress logging, chat, and doctor plans."""
+"""Patient-facing routes: profile, progress logging, chat, and plans."""
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -8,12 +8,13 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.agent import context as ctx
+from app.agent import plans
 from app.agent.triage import AgentUnavailable, handle_message
 from app.auth import require_patient
 from app.db import get_db
 from app.models import (ChatMessage, Condition, DoctorPlan, Exercise, Profile, ProgressLog, User,
                         UserCondition)
-from app.schemas import ChatIn, ProfileIn, ProgressIn
+from app.schemas import ChatIn, PlanFeedbackIn, ProfileIn, ProgressIn
 
 router = APIRouter(tags=["patient"])
 
@@ -52,6 +53,7 @@ def put_profile(body: ProfileIn, user: User = Depends(require_patient), db: Sess
     if unknown:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Unknown condition codes: {sorted(unknown)}")
     fields = body.model_dump(exclude={"conditions"})
+    old_codes = ctx.condition_codes(user)
     if user.profile is None:
         db.add(Profile(user_id=user.id, **fields))
     else:
@@ -61,6 +63,7 @@ def put_profile(body: ProfileIn, user: User = Depends(require_patient), db: Sess
     db.add_all(UserCondition(user_id=user.id, condition_code=c) for c in codes)
     db.flush()
     db.refresh(user)
+    plans.on_profile_saved(db, user, old_codes)
     return _profile_out(user)
 
 
@@ -123,3 +126,29 @@ def my_plans(user: User = Depends(require_patient), db: Session = Depends(get_db
                       .order_by(DoctorPlan.created_at.desc())).all()
     return [{"id": p.id, "case_id": p.case_id, "doctor": p.doctor.name, "instructions": p.instructions,
              "exercises": p.exercises, "given_on": p.created_at.isoformat()} for p in rows]
+
+
+@router.get("/plans/pending")
+def my_pending_plan(user: User = Depends(require_patient), db: Session = Depends(get_db)):
+    """A plan waiting for the doctor. Status only: the patient sees the
+    exercises once the doctor has approved them."""
+    p = plans.pending_proposal(db, user.id)
+    return plans.proposal_dict(p) if p else None
+
+
+@router.post("/plans/too-hard", status_code=201)
+def plan_too_hard(body: PlanFeedbackIn, user: User = Depends(require_patient), db: Session = Depends(get_db)):
+    plan = plans.latest_plan(db, user.id)
+    if plan is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "You don't have a plan yet")
+    if plans.pending_proposal(db, user.id) is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "A new plan is already waiting for your doctor")
+    unknown = set(body.activity_types) - {e["activity_type"] for e in plan.exercises}
+    if unknown:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Not in your plan: {sorted(unknown)}")
+    note = body.note.strip() if body.note else None
+    if body.pain_level is not None and body.pain_level >= plans.PAIN_TO_DOCTOR:
+        case = plans.escalate_painful_plan(db, user, plan, body.activity_types, body.pain_level, note)
+        return {"status": "doctor_case", "case": ctx.case_dict(case), "proposal": None}
+    proposal = plans.request_easier(db, user, plan, body.activity_types, note)
+    return {"status": "pending_review", "case": None, "proposal": plans.proposal_dict(proposal)}

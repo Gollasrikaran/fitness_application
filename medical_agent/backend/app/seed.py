@@ -37,12 +37,15 @@ def load_reference_data(db: Session) -> dict[str, int]:
         db.add(Exercise(activity_type=r["activity_type"], display_name=r["display_name"],
                         amount_unit=r["amount_unit"], default_sets=int(r["default_sets"] or 1),
                         default_amount=float(r["default_amount"] or 1),
-                        per_side=r.get("per_side", "").lower() in ("true", "1", "yes")))
+                        per_side=r.get("per_side", "").lower() in ("true", "1", "yes"),
+                        progression_step=float(r["progression_step"] or 1),
+                        priority_order=int(r["priority_order"] or 0)))
     db.flush()
     rules = _rows("safety_grid.csv")
     for r in rules:
         db.add(SafetyRule(condition_code=r["condition_code"], activity_type=r["activity_type"],
-                          verdict=r["verdict"], note=r["note"]))
+                          verdict=r["verdict"], note=r["note"],
+                          usefulness_rank=int(r["usefulness_rank"]) if r["usefulness_rank"] else None))
     return {"conditions": len(_rows("conditions.csv")),
             "exercises": len(_rows("activity_taxonomy.csv")), "safety_rules": len(rules)}
 

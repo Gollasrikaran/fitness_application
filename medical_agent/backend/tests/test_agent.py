@@ -10,13 +10,25 @@ def chat(client, headers, text):
     return r.json()
 
 
-def test_self_care_with_only_approved_exercises(client, patient, llm):
+def test_self_care_never_suggests_exercises(client, patient, llm):
     h = patient()
-    llm.response.update(suggested_exercises=["walk", "not_a_real_exercise", "glute_bridge"])
+    llm.response.update(suggested_exercises=["walk", "glute_bridge"])  # ignored: plans come from a doctor
     out = chat(client, h, "my back is a bit stiff this morning")
     assert out["decision"] == "self_care"
-    assert [e["activity_type"] for e in out["exercises"]] == ["walk", "glute_bridge"]
+    assert out["exercises"] == []
     assert out["case"] is None
+    assert "APPROVED_EXERCISES" not in llm.calls[0][1]["content"]
+    assert '"PENDING_PLAN": {' in llm.calls[0][1]["content"]  # the starter plan waiting for the doctor
+
+
+def test_reply_may_only_name_exercises_in_the_doctors_plan(client, patient, doctor, llm):
+    h = patient()
+    llm.response.update(reply="Try some gentle Walking today.")
+    assert "walking" not in chat(client, h, "what should I do?")["reply"].lower()  # no plan yet
+
+    draft = client.get("/doctor/proposals", headers=doctor).json()[0]["id"]
+    client.post(f"/doctor/proposals/{draft}/approve", headers=doctor, json={})  # the plan includes walking
+    assert chat(client, h, "what should I do?")["reply"] == "Try some gentle Walking today."
 
 
 def test_agent_sees_profile_progress_and_history(client, patient, llm):

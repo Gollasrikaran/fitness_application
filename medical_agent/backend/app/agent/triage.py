@@ -6,20 +6,22 @@ Order of authority, highest first:
                                  worrying progress signal forces "doctor".
   3. The LLM                   — decides within those limits. It may escalate,
                                  never de-escalate.
-  4. Output checks             — a stated pain >= 7 forces "doctor"; exercises
-                                 outside the safety grid are dropped.
+  4. Output checks             — a stated pain >= 7 forces "doctor"; a reply
+                                 naming an exercise outside the doctor's plan is
+                                 replaced. The chat never suggests exercises:
+                                 plans only come from a doctor (app.agent.plans).
 """
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from app.agent import context as ctx
 from app.agent import red_flags
+from app.agent.cases import upsert_case
 from app.agent.llm import LLMError, complete_json
 from app.agent.prompts import build_messages
 from app.config import settings
@@ -29,7 +31,6 @@ log = logging.getLogger("medical_agent.triage")
 
 DECISIONS = ("self_care", "clarify", "doctor", "emergency")
 PAIN_SCORE_TO_DOCTOR = 7
-_URGENCY_RANK = {"routine": 0, "priority": 1, "emergency": 2}
 DOCTOR_NOTE = "I've shared this with a doctor on our team, who will review it and send you a plan."
 
 
@@ -57,7 +58,7 @@ def _forced_doctor_reasons(context: dict, flags: list[red_flags.Flag]) -> list[s
 
 
 def _mentions_unapproved_exercise(reply: str, db: Session, approved: set[str]) -> bool:
-    """True if the reply names a catalogue exercise the patient isn't approved for."""
+    """True if the reply names a catalogue exercise that isn't in the patient's plan."""
     text = reply.lower()
     return any(e.display_name.lower() in text
                for e in db.query(Exercise).all() if e.activity_type not in approved)
@@ -69,27 +70,8 @@ def _safe_reply(decision: str) -> str:
     if decision == "doctor":
         return ("To be safe, please hold off on any new or strenuous exercise for now, and rest if "
                 "something hurts. " + DOCTOR_NOTE)
-    return "Here are the exercises that are safe for you right now. Stop if anything hurts more."
-
-
-def _upsert_case(db: Session, user: User, urgency: str, reason: str, summary: str,
-                 triggers: list[str]) -> Case:
-    case = ctx.open_case(db, user.id)
-    if case is None:
-        case = Case(user_id=user.id, urgency=urgency, reason=reason, summary=summary, triggers=triggers)
-        db.add(case)
-        db.flush()
-        log.warning("New %s case %s opened", urgency, case.id)  # ids only: no health data in logs
-    else:
-        if _URGENCY_RANK[urgency] > _URGENCY_RANK[case.urgency]:
-            case.urgency = urgency
-            log.warning("Case %s raised to %s", case.id, urgency)
-        case.reason = reason
-        # Keep earlier hand-offs: a doctor needs the whole story, not just the latest turn.
-        stamp = datetime.now(timezone.utc).strftime("%d %b %H:%M UTC")
-        case.summary = f"{case.summary}\n\nUpdate {stamp}: {summary}"
-        case.triggers = sorted(set(case.triggers or []) | set(triggers))
-    return case
+    return ("Please stick to the exercises in the plan your doctor gave you, and stop if anything hurts "
+            "more. If you'd like a change, your doctor can review your plan.")
 
 
 def _save_turn(db: Session, user: User, message: str, result: TurnResult, case: Case | None) -> None:
@@ -120,10 +102,10 @@ def handle_message(db: Session, user: User, message: str,
     emergencies = [f for f in flags if f.level == "emergency"]
     if emergencies:
         labels = ", ".join(f.label for f in emergencies)
-        case = _upsert_case(db, user, "emergency", f"Emergency red flag: {labels}",
-                            f'Patient wrote: "{message[:600]}". Automatic red-flag match: {labels}. '
-                            "Patient was told to call 112/108 or go to an emergency department.",
-                            flag_codes)
+        case = upsert_case(db, user, "emergency", f"Emergency red flag: {labels}",
+                           f'Patient wrote: "{message[:600]}". Automatic red-flag match: {labels}. '
+                           "Patient was told to call 112/108 or go to an emergency department.",
+                           flag_codes)
         result = TurnResult(red_flags.emergency_reply(flags), "emergency", f"Red flag: {labels}",
                             case=ctx.case_dict(case), flags=flag_codes)
         _save_turn(db, user, message, result, case)
@@ -142,7 +124,7 @@ def handle_message(db: Session, user: User, message: str,
         if not forced:
             raise AgentUnavailable("The assistant is unavailable right now. Please try again in a minute.")
         out = {"decision": "doctor", "reply": "", "reason": "; ".join(forced), "urgency": "priority",
-               "doctor_summary": None, "suggested_exercises": [], "new_facts": []}
+               "doctor_summary": None, "new_facts": []}
 
     decision = out.get("decision") if out.get("decision") in ("self_care", "clarify", "doctor") else "doctor"
     reply = str(out.get("reply") or "").strip()
@@ -161,13 +143,10 @@ def handle_message(db: Session, user: User, message: str,
         reply = ("Thanks for telling me. To be safe, please rest and avoid any movement that makes it worse. "
                  + DOCTOR_NOTE)
 
-    approved = {e["activity_type"]: e for e in context["approved_exercises"]}
-    if _mentions_unapproved_exercise(reply, db, set(approved)):
+    plan = context["doctor_plan"]
+    in_plan = {e["activity_type"] for e in plan["exercises"]} if plan else set()
+    if _mentions_unapproved_exercise(reply, db, in_plan):
         reply = _safe_reply(decision)
-    exercises = []
-    if decision != "doctor":
-        suggested = out.get("suggested_exercises") or []
-        exercises = [approved[a] for a in suggested if isinstance(a, str) and a in approved][:3]
 
     case = None
     if decision == "doctor":
@@ -175,11 +154,11 @@ def handle_message(db: Session, user: User, message: str,
         all_reasons = forced + ([reason] if reason else [])
         summary = str(out.get("doctor_summary") or "").strip() or (
             f'Patient wrote: "{message[:600]}". Escalated because: {"; ".join(all_reasons) or "assistant judgement"}.')
-        case = _upsert_case(db, user, urgency, "; ".join(all_reasons)[:500] or "Assistant referred to doctor",
-                            summary, triggers)
+        case = upsert_case(db, user, urgency, "; ".join(all_reasons)[:500] or "Assistant referred to doctor",
+                           summary, triggers)
 
     _remember(db, user, out.get("new_facts"), context["memory"])
-    result = TurnResult(reply, decision, reason or "; ".join(forced), exercises,
+    result = TurnResult(reply, decision, reason or "; ".join(forced), [],
                         ctx.case_dict(case) if case else context["open_case"], flag_codes)
     _save_turn(db, user, message, result, case)
     return result
