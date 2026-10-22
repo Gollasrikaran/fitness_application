@@ -1,0 +1,90 @@
+AGENT CONTEXT FEATURES
+======================
+
+What the agent gets to know about a patient, read from the live clinic
+database (read-only), keyed by the clinic's patient id.
+
+Code: backend/app/clinic.py -> patient_context()
+Shown in the app: the "What the agent sees" panel, next to the chat.
+
+
+WHO USES THE AGENT
+------------------
+Patient mode  - a patient chats with the agent about themselves.
+Doctor mode   - a doctor picks one of their patients and asks the agent
+                about that patient.
+Only adults (18+) are listed. Deleted, test (is_demo) and merged patient
+records are never shown.
+
+
+FEATURES WE ARE TAKING
+----------------------
+
+1. About the patient
+   - Age, sex, preferred language, date registered.
+     (patient.age_years, sex, preferred_language, created_at)
+
+2. Body measurements
+   - Latest weight and height, and the BMI worked out from them, with the
+     date measured. (visit.vitals_json: weight_kg, height_cm)
+
+3. Health conditions
+   a. Recorded by a doctor, with severity and status.
+      (patient_condition + long_term_condition)
+   b. Health-history questionnaire answers marked "present", with any notes:
+      hypertension, diabetes, thyroid, heart disease, asthma,
+      high cholesterol, tuberculosis. (patient.health_history_json)
+   c. The patient's long-term conditions list. (patient.long_term_conditions)
+   d. Diagnoses from the last 10 visits, provisional and confirmed.
+      (prescription.provisional_diagnosis, confirmed_diagnosis)
+
+4. Vital flags
+   - Abnormal and critical vital readings from the last 5 visits: blood
+     pressure, pulse, SpO2, temperature, sugar, haemoglobin. Comes from the
+     clinic's own versioned flag rules. Readings flagged IMPLAUSIBLE (likely
+     typing errors) are left out. (visit_vital_flag)
+
+5. Recent vitals
+   - BP, pulse, SpO2, temperature, sugar, haemoglobin, weight from the last
+     10 visits, with dates. (visit.vitals_json)
+
+6. Current medicines
+   - Medicines on the latest prescription: name, dose, frequency, duration.
+     (prescriptionitem)
+   - The doctor's latest instructions to the patient, and the follow-up date
+     they set. (prescription.patient_instructions, follow_up_at)
+
+7. Ongoing care
+   - Visit count, first and last visit dates.
+   - Recent complaints, with how long they've lasted and which doctor saw
+     them. (visit.chief_complaint, complaint_duration)
+   - Follow-ups: how many are pending (and the next due date), how many
+     were missed. (followup_schedule)
+   - Open disease episodes. (patient_disease_journey: OPEN, ACTIVE_FOLLOWUP)
+   - Open care tasks, e.g. patient outreach. (care_task: OPEN, CLAIMED)
+
+8. Alerts
+   - Visits marked as emergencies. (prescription.is_emergency)
+   - Referrals to a specialist. (prescription.is_referral_recommended,
+     referral_specialist_name, referral_treatment_name)
+
+9. Other history
+   - Surgeries, hospitalisations, drug allergies, smoking, alcohol, with
+     notes, when marked "present". (patient.health_history_json)
+
+
+NOT TAKEN YET (later)
+---------------------
+- The rule-based clinical snapshot from dataanalysis/ (flags graded
+  high / medium / info). Needs to be called from dataanalysis.
+- The AI clinical review from dataanalysis/. Only exists after a clinician
+  opens the patient in that dashboard.
+- Lab results from uploaded reports (OCR). Left out on purpose.
+
+
+NEVER TAKEN
+-----------
+- Patient name, phone number, address, government ID, family links.
+- Uploaded documents and photos (visible to doctors and coordinators only).
+- Consultation video and session data.
+- Staff passwords and IDs. (Doctor names are shown, as staff.)
