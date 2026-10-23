@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api.js";
 import AgentPanel from "./AgentPanel.jsx";
+import PatientPlan from "./PatientPlan.jsx";
 
-// No login: choose who you are acting as (a patient, or a doctor asking about
-// one of their patients), pick a patient, and chat. The right-hand panel shows
-// exactly what the agent knows about that patient.
+// No login. Patient tab: pick a patient and see the plan their doctor
+// approved (patients don't chat with the agent). Doctor tab: pick a doctor and
+// one of their patients, ask the agent about them, and review plans. The
+// right-hand panel shows exactly what the agent knows about that patient.
 
 const sexShort = (s) => ({ FEMALE: "F", MALE: "M", OTHER: "O" })[s] || "?";
 const pretty = (s) => String(s || "").replace(/_/g, " ").toLowerCase();
@@ -91,7 +93,7 @@ export default function App() {
           </label>
         )}
         <label className="grow">
-          {mode === "doctor" ? "Patient to ask about" : "Act as patient"}
+          {mode === "doctor" ? "Patient to ask about" : "View as patient"}
           <select value={patientId} onChange={(e) => setPatientId(e.target.value)} disabled={!patients.length}>
             <option value="">
               {mode === "doctor" && !doctorId ? "Choose a doctor first" : `Choose a patient… (${patients.length})`}
@@ -110,30 +112,40 @@ export default function App() {
       </div>
       {error && <p className="error pad">{error}</p>}
 
-      {patientId ? (
-        <div className="workspace">
-          <Chat key={`${mode}-${doctorId}-${patientId}`} mode={mode} patientId={patientId} doctor={doctor} onReply={bump} />
-          <aside className="side">
-            <AgentPanel patientId={patientId} mode={mode} doctor={doctor} doctors={doctors} version={version} onChanged={bump} />
-            <ContextPanel patientId={patientId} />
-          </aside>
-        </div>
-      ) : (
+      {!patientId ? (
         <p className="muted center">
           {mode === "doctor"
             ? "Pick a doctor, then one of their patients, to ask the agent about them."
-            : "Pick a patient to chat with the agent as them."}
+            : "Pick a patient to see the plan their doctor approved."}
         </p>
+      ) : mode === "patient" ? (
+        <PatientPlan key={patientId} patientId={patientId} doctors={doctors} />
+      ) : (
+        <div className="workspace">
+          <Chat key={`${doctorId}-${patientId}`} patientId={patientId} doctor={doctor} onReply={bump} />
+          <aside className="side">
+            <AgentPanel patientId={patientId} doctor={doctor} doctors={doctors} version={version} onChanged={bump} />
+            <ContextPanel patientId={patientId} />
+          </aside>
+        </div>
       )}
     </div>
   );
 }
 
-function Chat({ mode, patientId, doctor, onReply }) {
+function Chat({ patientId, doctor, onReply }) {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const endRef = useRef(null);
+
+  // The conversation is saved on the server: show it again after a reload.
+  useEffect(() => {
+    const query = new URLSearchParams({ patient_id: patientId, doctor_id: doctor.id });
+    api("GET", `/chat/history?${query}`)
+      .then((saved) => setMessages(saved.map((m) => ({ role: m.role, content: m.content }))))
+      .catch(() => {});
+  }, [patientId, doctor.id]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -147,8 +159,8 @@ function Chat({ mode, patientId, doctor, onReply }) {
     setBusy(true);
     setMessages((m) => [...m, { role: "user", content: message }]);
     try {
-      const out = await api("POST", "/chat", { mode, patient_id: patientId, doctor_id: doctor?.id || null, message });
-      setMessages((m) => [...m, { role: "assistant", content: out.reply, meta: out }]);
+      const out = await api("POST", "/chat", { patient_id: patientId, doctor_id: doctor.id, message });
+      setMessages((m) => [...m, { role: "assistant", content: out.reply }]);
       onReply();
     } catch (err) {
       setMessages((m) => [...m, { role: "error", content: err.message }]);
@@ -160,21 +172,15 @@ function Chat({ mode, patientId, doctor, onReply }) {
   return (
     <section className="chat card">
       <div className="chat-head small muted">
-        {mode === "doctor" ? `Dr. ${doctor?.name} asking about patient #${patientId.slice(0, 8)}` : `Chatting as patient #${patientId.slice(0, 8)}`}
+        Dr. {doctor.name} asking about patient #{patientId.slice(0, 8)}
       </div>
       <div className="messages">
         {messages.length === 0 && (
-          <p className="muted">
-            {mode === "doctor"
-              ? "Ask about this patient, e.g. “Is it safe to start walking?” or “Summarise their BP trend.”"
-              : "Write as the patient, e.g. “My knee hurts after walking, what should I do?”"}
-          </p>
+          <p className="muted">Ask about this patient, e.g. “What happened at the last visit?” or “Summarise their BP trend.”</p>
         )}
         {messages.map((m, i) => (
           <div key={i} className={`msg ${m.role}`}>
-            {m.meta && <span className={`badge route-${m.meta.route}`}>{ROUTE_LABEL[m.meta.route] || m.meta.route}</span>}
             <div className="content">{m.content}</div>
-            {m.meta && <Decision meta={m.meta} mode={mode} />}
           </div>
         ))}
         {busy && <div className="msg assistant muted">Thinking…</div>}
@@ -187,33 +193,6 @@ function Chat({ mode, patientId, doctor, onReply }) {
         </button>
       </form>
     </section>
-  );
-}
-
-const ROUTE_LABEL = {
-  chat: "Answered",
-  clarify: "Asked a question",
-  plan: "Plan request",
-  doctor: "Sent to a doctor",
-  emergency: "Emergency",
-};
-
-// Why the agent answered the way it did: the supervisor's ratings and the
-// fixed rules that applied. Testbed only.
-function Decision({ meta, mode }) {
-  if (mode === "doctor") return null;
-  return (
-    <details className="decision small muted">
-      <summary>
-        {meta.intent} · condition {meta.condition_severity} · request {meta.request_severity}
-        {meta.pain_score != null ? ` · pain ${meta.pain_score}/10` : ""}
-      </summary>
-      {meta.reason && <div>Reason: {meta.reason}</div>}
-      {meta.red_flags.length > 0 && <div>Red flags: {meta.red_flags.join(", ")}</div>}
-      {meta.forced_reasons.length > 0 && <div>Forced to doctor: {meta.forced_reasons.join("; ")}</div>}
-      <div>Agent conditions: {meta.conditions.join(", ")}</div>
-      {meta.case && <div>Doctor case saved: {meta.case.urgency}</div>}
-    </details>
   );
 }
 

@@ -6,7 +6,6 @@ becomes a Plan, which is what the patient sees and follows.
 
   starter  first plan: safety-grid exercises for all the patient's
            conditions, most useful first, at the reviewed default doses.
-  easier   "too hard": the named exercises (or all) drop one step.
   update   the patient's conditions in the record changed: exercises a new
            condition rules out leave the plan; safe ones take their place.
 
@@ -16,7 +15,6 @@ draft: the proposal asks the doctor to write the plan.
 """
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -132,42 +130,6 @@ def starter_exercises(db: Session, codes: list[str], age: int | None, bmi: float
     return exercises, rules
 
 
-def easier_exercises(db: Session, current: list[dict], targets: set[str]) -> tuple[list[dict], list[dict]]:
-    """One step down for each targeted exercise (all if `targets` is empty)."""
-    steps = {e.activity_type: e.progression_step for e in db.scalars(select(Exercise))}
-    exercises, changes = [], []
-    for e in current:
-        e = dict(e)
-        if targets and e["activity_type"] not in targets:
-            exercises.append(e)
-            continue
-        step = steps.get(e["activity_type"], 1)
-        before = {"sets": e["sets"], "amount": e["amount"]}
-        if e["amount"] - step >= step - 1e-9:
-            e["amount"] = round(e["amount"] - step, 2)
-            note = f"{before['amount']:g} -> {e['amount']:g} {e['unit']} per set"
-        elif e["sets"] > 1:
-            e["sets"] -= 1
-            note = f"{before['sets']} -> {e['sets']} sets"
-        else:
-            note = "Already at the lowest dose; needs the doctor's decision"
-        exercises.append(e)
-        changes.append({"activity_type": e["activity_type"], "name": e["name"], "from": before,
-                        "to": {"sets": e["sets"], "amount": e["amount"]}, "note": note})
-    return exercises, changes
-
-
-def exercises_named(db: Session, text: str, among: list[dict]) -> list[str]:
-    """Plan exercises the patient named in a message ("bridges are too hard")."""
-    text = text.lower()
-    found = []
-    for ex in db.scalars(select(Exercise).where(Exercise.activity_type.in_([e["activity_type"] for e in among]))):
-        names = [ex.display_name.lower(), *ex.synonyms]
-        if any(re.search(rf"\b{re.escape(n)}\b", text) for n in names if n):
-            found.append(ex.activity_type)
-    return found
-
-
 def _names(db: Session, codes: list[str]) -> dict[str, str]:
     return {c.code: c.display_name for c in db.scalars(select(Condition).where(Condition.code.in_(codes)))}
 
@@ -195,7 +157,7 @@ def _replace_pending(db: Session, patient_id: str, proposal: PlanProposal) -> Pl
 
 def request_plan(db: Session, patient_id: str, codes: list[str], age: int | None,
                  bmi: float | None) -> tuple[str, PlanProposal | None]:
-    """The patient asks for a plan. Returns (status, proposal):
+    """Draft a first plan. Returns (status, proposal):
     "has_plan" | "pending" (already waiting) | "drafted"."""
     if latest_plan(db, patient_id) is not None:
         return "has_plan", None
@@ -207,7 +169,7 @@ def request_plan(db: Session, patient_id: str, codes: list[str], age: int | None
     exercises, rules = starter_exercises(db, codes, age, bmi)
     if exercises:
         source, instructions = "rules", f"Starter plan built from the safety rules for: {label}."
-        reason = "\n".join([f"Patient asked for a plan. Exercises chosen by the safety grid for: {label}.", *rules])
+        reason = "\n".join([f"Exercises chosen by the safety grid for: {label}.", *rules])
     else:
         source, instructions, reason = "doctor", "", _needs_doctor(db, codes)
     proposal = PlanProposal(patient_id=patient_id, kind="starter", source=source, instructions=instructions,
@@ -217,21 +179,11 @@ def request_plan(db: Session, patient_id: str, codes: list[str], age: int | None
     return "drafted", proposal
 
 
-def request_easier(db: Session, patient_id: str, plan: Plan, targets: list[str], note: str) -> PlanProposal:
-    exercises, changes = easier_exercises(db, plan.exercises, set(targets))
-    which = ", ".join(c["name"] for c in changes)
-    proposal = PlanProposal(
-        patient_id=patient_id, kind="easier", source="rules", exercises=exercises, changes=changes,
-        instructions=f"An easier version of your plan from {plan.created_at.date().isoformat()}.\n{plan.instructions}",
-        reason=f"Patient said the plan is too hard ({'all exercises' if not targets else which}). Each one dropped a step.",
-        conditions=plan.conditions, patient_note=note[:1000], based_on_plan_id=plan.id)
-    return _replace_pending(db, patient_id, proposal)
-
-
 def sync_conditions(db: Session, patient_id: str, codes: list[str], age: int | None,
                     bmi: float | None) -> PlanProposal | None:
     """The record's conditions changed since the current plan was made:
-    draft an update for the doctor. Runs on every patient turn."""
+    draft an update for the doctor. Not called yet: the doctor's "Generate
+    plan" (BUILD_PLAN.md, phase 5) will use it for a patient who has a plan."""
     plan = latest_plan(db, patient_id)
     if plan is None or set(plan.conditions) == set(codes):
         return None
@@ -244,7 +196,7 @@ def sync_conditions(db: Session, patient_id: str, codes: list[str], age: int | N
     what = "; ".join(filter(None, ["added " + ", ".join(names.get(c, c) for c in added) if added else "",
                                    "removed " + ", ".join(names.get(c, c) for c in removed) if removed else ""]))
     reason = f"Conditions in the record changed ({what})."
-    base = pending.exercises if pending is not None and pending.kind == "easier" else plan.exercises
+    base = plan.exercises
 
     if any(c.bucket == "refer" for c in db.scalars(select(Condition).where(Condition.code.in_(codes)))):
         return _replace_pending(db, patient_id, PlanProposal(

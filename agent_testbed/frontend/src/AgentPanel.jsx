@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { api } from "./api.js";
 
-// The agent's own data for one patient (temporary database): the approved
-// plan, the draft waiting for a doctor, and any open doctor case. In doctor
-// mode the draft and case can be reviewed here.
+// Doctor tab: the agent's own data for one patient (temporary database): the
+// approved plan, the draft waiting for review, and any open doctor case. The
+// draft and case are reviewed here.
 
-const KIND = { starter: "First plan", easier: "Easier plan (patient asked)", update: "Conditions changed" };
+const KIND = { starter: "First plan", easier: "Easier plan", update: "Conditions changed" };
 const dose = (d) => (d ? `${d.sets} × ${d.amount}` : "—");
 
-export default function AgentPanel({ patientId, mode, doctor, doctors, version, onChanged }) {
+export default function AgentPanel({ patientId, doctor, doctors, version, onChanged }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
 
@@ -25,8 +25,8 @@ export default function AgentPanel({ patientId, mode, doctor, doctors, version, 
 
   return (
     <>
-      {open_case && <CaseCard c={open_case} mode={mode} doctor={doctor} onChanged={onChanged} />}
-      {pending && <PendingCard p={pending} mode={mode} doctor={doctor} onChanged={onChanged} />}
+      {open_case && <CaseCard c={open_case} doctor={doctor} onChanged={onChanged} />}
+      {pending && <PendingCard p={pending} doctor={doctor} onChanged={onChanged} />}
       <div className="card">
         <h3>Exercise plan</h3>
         {plan ? (
@@ -42,14 +42,14 @@ export default function AgentPanel({ patientId, mode, doctor, doctors, version, 
             ))}
           </>
         ) : (
-          <div className="small muted">No approved plan yet. Ask the agent for one in the chat.</div>
+          <div className="small muted">No approved plan yet.</div>
         )}
       </div>
     </>
   );
 }
 
-function PendingCard({ p, mode, doctor, onChanged }) {
+function PendingCard({ p, doctor, onChanged }) {
   const [instructions, setInstructions] = useState(p.instructions);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
@@ -63,16 +63,6 @@ function PendingCard({ p, mode, doctor, onChanged }) {
       setError(e.message);
     }
   }
-
-  if (mode !== "doctor")
-    return (
-      <div className="card notice routine">
-        <strong>Waiting for the doctor</strong>
-        <div className="small">
-          {KIND[p.kind]} · requested {p.requested_on}
-        </div>
-      </div>
-    );
 
   return (
     <div className="card notice priority">
@@ -123,7 +113,7 @@ function PendingCard({ p, mode, doctor, onChanged }) {
   );
 }
 
-function CaseCard({ c, mode, doctor, onChanged }) {
+function CaseCard({ c, doctor, onChanged }) {
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
 
@@ -140,22 +130,18 @@ function CaseCard({ c, mode, doctor, onChanged }) {
   return (
     <div className={`card notice ${c.urgency}`}>
       <div className="row-between">
-        <strong>{mode === "doctor" ? "Open case" : "A doctor is looking into this"}</strong>
+        <strong>Open case</strong>
         <span className={`badge ${c.urgency}`}>{c.urgency}</span>
       </div>
       <div className="small">{c.reason}</div>
-      {mode === "doctor" && (
-        <>
-          <p className="small pre muted">{c.summary}</p>
-          {error && <p className="error small">{error}</p>}
-          <div className="actions">
-            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" />
-            <button className="link" onClick={close}>
-              Close case
-            </button>
-          </div>
-        </>
-      )}
+      <p className="small pre muted">{c.summary}</p>
+      {error && <p className="error small">{error}</p>}
+      <div className="actions">
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" />
+        <button className="link" onClick={close}>
+          Close case
+        </button>
+      </div>
     </div>
   );
 }

@@ -1,4 +1,5 @@
-"""Agent testbed API. No login: pick a patient or a doctor and chat with the agent.
+"""Agent testbed API. No login: a doctor picks a patient and asks the agent
+about them; a patient only sees the plan a doctor approved.
 
     uvicorn app.main:app --port 8001 --reload --reload-dir app --reload-dir agent --reload-dir store
 """
@@ -6,17 +7,16 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from typing import Literal
-
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from agent.main import AgentUnavailable, run_turn
+from agent.main import AgentUnavailable, close_memory, open_memory, run_turn, thread_id
 from app import clinic
 from app.config import settings
 from app.db import fetch_one, pool
 from store import cases as case_store
+from store import messages as message_store
 from store import plans as plan_store
 from store.db import session
 from store.models import Case, PlanProposal
@@ -29,7 +29,9 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 async def lifespan(_: FastAPI):
     pool.open()
     init_store()  # the agent's own tables in the temporary database
+    open_memory()  # the agent's conversation memory, also in the temporary database
     yield
+    close_memory()
     pool.close(timeout=1)  # don't let a slow pooler hold up --reload
 
 
@@ -65,25 +67,37 @@ def patient_context(patient_id: str):
 
 
 class ChatIn(BaseModel):
-    mode: Literal["patient", "doctor"]
     patient_id: str
-    doctor_id: str | None = None
+    doctor_id: str = Field(min_length=1)
     message: str = Field(min_length=1, max_length=2000)
 
 
 @app.post("/chat")
 def chat(body: ChatIn):
-    if body.mode == "doctor" and not body.doctor_id:
-        raise HTTPException(422, "Pick a doctor first")
+    """A doctor asks the agent about one of their patients."""
     try:
-        return run_turn(body.mode, body.patient_id, body.doctor_id, body.message.strip())
+        return run_turn(body.patient_id, body.doctor_id, body.message.strip())
     except AgentUnavailable as exc:
         raise HTTPException(503, str(exc))
     except ValueError as exc:  # unknown patient
         raise HTTPException(404, str(exc))
 
 
+@app.get("/chat/history")
+def chat_history(patient_id: str, doctor_id: str):
+    """The saved conversation, oldest first, so a reload shows it again."""
+    with session() as db:
+        return message_store.history(db, thread_id(patient_id, doctor_id))
+
+
 # ── The agent's own data: plans, drafts, cases (temporary database) ──────────
+
+@app.get("/patients/{patient_id}/plan")
+def approved_plan(patient_id: str):
+    """What the patient sees: the latest plan a doctor approved, nothing else."""
+    with session() as db:
+        return {"plan": plan_store.plan_dict(plan_store.latest_plan(db, patient_id))}
+
 
 @app.get("/patients/{patient_id}/agent")
 def agent_data(patient_id: str):
@@ -138,3 +152,7 @@ def close_case(case_id: str, body: ReviewIn):
             raise HTTPException(404, "Case not found")
         case_store.close_case(case, body.doctor_id, (body.note or "").strip() or None)
         return {"status": case.status}
+
+
+#@app.get("/patients/{id}/plan")
+#def patient_pan()

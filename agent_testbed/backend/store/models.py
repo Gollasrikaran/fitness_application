@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from store.db import Base
@@ -22,7 +22,8 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# ── Reference data (loaded from data/*.csv) ─────────────────────────────────
+# ── Reference data (data/*.csv merged with the reference DB, see store/seed.py) ─
+# Rebuilt on every start, so nothing else may point at these rows by foreign key.
 
 class Condition(Base):
     __tablename__ = "conditions"
@@ -30,18 +31,26 @@ class Condition(Base):
     display_name: Mapped[str] = mapped_column(String(128))
     bucket: Mapped[str] = mapped_column(String(16))  # supported | refer
     display_order: Mapped[int] = mapped_column(Integer, default=0)
+    notes: Mapped[str] = mapped_column(Text, default="")
 
 
 class Exercise(Base):
     __tablename__ = "exercises"
     activity_type: Mapped[str] = mapped_column(String(64), primary_key=True)
     display_name: Mapped[str] = mapped_column(String(128))
+    prescription_type: Mapped[str] = mapped_column(String(16), default="reps")  # reps | hold | distance
     amount_unit: Mapped[str] = mapped_column(String(16))
     default_sets: Mapped[int] = mapped_column(Integer, default=1)
     default_amount: Mapped[float] = mapped_column(Float, default=1)
+    max_sets: Mapped[int] = mapped_column(Integer, default=1)
+    max_amount: Mapped[float] = mapped_column(Float, default=1)
+    per_side: Mapped[bool] = mapped_column(Boolean, default=False)
+    rest_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     progression_step: Mapped[float] = mapped_column(Float, default=1)
     priority_order: Mapped[int] = mapped_column(Integer, default=0)
-    synonyms: Mapped[list] = mapped_column(JSON, default=list)  # how patients name it, for "too hard"
+    # For the patient's plan page, from the reference DB
+    instructions: Mapped[list] = mapped_column(JSON, default=list)  # steps, in order
+    images: Mapped[list] = mapped_column(JSON, default=list)  # demo image URLs
 
 
 class SafetyRule(Base):
@@ -56,6 +65,22 @@ class SafetyRule(Base):
 
 
 # ── The agent's own data ────────────────────────────────────────────────────
+
+class Message(Base):
+    """Every chat turn, as shown in the app. The agent's working memory is
+    LangGraph's checkpointer (its own tables in this schema); this table is
+    the readable record of what was said and what the agent decided."""
+    __tablename__ = "messages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    thread_id: Mapped[str] = mapped_column(String(128), index=True)  # agent.main.thread_id()
+    mode: Mapped[str] = mapped_column(String(16))  # patient | doctor
+    patient_id: Mapped[str] = mapped_column(String(36), index=True)
+    doctor_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    role: Mapped[str] = mapped_column(String(16))  # user | assistant
+    content: Mapped[str] = mapped_column(Text)
+    meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # the agent's decision (assistant turns)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
 
 class Case(Base):
     """Something the agent passed to a doctor. One open case per patient;

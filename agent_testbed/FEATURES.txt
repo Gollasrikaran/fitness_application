@@ -10,9 +10,10 @@ Shown in the app: the "What the agent sees" panel, next to the chat.
 
 WHO USES THE AGENT
 ------------------
-Patient mode  - a patient chats with the agent about themselves.
-Doctor mode   - a doctor picks one of their patients and asks the agent
-                about that patient.
+Doctors only. A doctor picks one of their patients and asks the agent about
+that patient; the agent will also draft exercise plans for the doctor to
+approve. Patients don't chat with the agent: they only see the plan a doctor
+approved.
 Only adults (18+) are listed. Deleted, test (is_demo) and merged patient
 records are never shown.
 
@@ -53,6 +54,15 @@ FEATURES WE ARE TAKING
      (prescriptionitem)
    - The doctor's latest instructions to the patient, and the follow-up date
      they set. (prescription.patient_instructions, follow_up_at)
+
+6a. Visit by visit
+   - The last 10 visits, newest first, each with what was recorded at it:
+     date, doctor, complaint and duration, vitals, provisional and
+     confirmed diagnosis, every medicine prescribed (name, dose, frequency,
+     duration, notes), instructions to the patient, follow-up date,
+     emergency and referral. (visit, prescription, prescriptionitem)
+   - This is what the chat model reads, so "the last visit" or "what was
+     he on two visits ago" can be answered from one place.
 
 7. Ongoing care
    - Visit count, first and last visit dates.

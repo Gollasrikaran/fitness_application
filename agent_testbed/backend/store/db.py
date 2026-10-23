@@ -28,6 +28,11 @@ def _url() -> str:
     return url.replace("postgresql://", "postgresql+psycopg://", 1)
 
 
+def psycopg_url() -> str:
+    """The same database as a plain psycopg URL (for LangGraph's checkpointer)."""
+    return _url().replace("postgresql+psycopg://", "postgresql://", 1)
+
+
 # prepare_threshold=None: required behind Supabase's connection pooler.
 engine = create_engine(_url(), pool_pre_ping=True, connect_args={"prepare_threshold": None})
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)

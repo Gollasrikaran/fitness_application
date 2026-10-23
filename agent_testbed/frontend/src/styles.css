@@ -87,13 +87,8 @@ button.link { background: none; border: 0; color: var(--primary); cursor: pointe
   .workspace { grid-template-columns: 1fr; height: auto; }
   .msg { max-width: 95%; }
 }
-.badge.route-chat, .badge.route-clarify { background: #e6f4ea; color: var(--good); }
-.badge.route-plan { background: #eef2ff; color: #3949ab; }
-.badge.route-doctor { background: #fff4e0; color: var(--warn); }
-.badge.route-emergency { background: #fdecea; color: var(--bad); }
-.decision { margin-top: 6px; }
-.decision summary { cursor: pointer; }
-.decision div { margin-top: 2px; }
+.patient-plan { max-width: 720px; margin: 16px auto; font-size: 17px; }
+.patient-plan li { margin: 10px 0; }
 .notice.routine { border-color: var(--primary); }
 .actions input { flex: 1; }
 button.danger { color: var(--bad); }

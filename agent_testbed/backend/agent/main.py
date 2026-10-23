@@ -1,70 +1,72 @@
-"""The agent graph.
+"""The agent graph: a doctor asks about one of their patients.
 
-patient mode:
-  load_context → safety_screen ─┬─ emergency (fixed reply, no AI)
-                                └─ supervisor ─┬─ chat (also asks one clarifying question)
-                                               ├─ plan
-                                               ├─ doctor_handoff
-                                               └─ emergency
-doctor mode:
-  load_context → chat (answers the doctor about the patient)
+  load_context (clinic record, no AI) → chat (answers from the record)
+
+Patients don't chat with the agent: they only see the plan a doctor approved.
 """
 from __future__ import annotations
 
 from langchain_core.messages import HumanMessage
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, START, StateGraph
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
-from agent import nodes, routing
+from agent import nodes
 from agent.nodes import AgentUnavailable
 from agent.state import AgentState
+from store import messages as message_store
+from store.db import SCHEMA, psycopg_url, session
 
-__all__ = ["AgentUnavailable", "graph", "run_turn"]
+__all__ = ["AgentUnavailable", "close_memory", "graph", "open_memory", "run_turn"]
+
+
+def _in_our_schema(conn) -> None:
+    # The checkpointer's tables live in the temp database's agent_tmp schema,
+    # next to ours. (The temp database uses the session pooler, so this holds.)
+    conn.execute(f'SET search_path TO "{SCHEMA}"')
+
+
+# The agent's memory of each conversation, in the temp database: it survives
+# restarts. Opened by open_memory() when the app starts.
+_memory_pool = ConnectionPool(psycopg_url(), min_size=1, max_size=4, open=False, configure=_in_our_schema,
+                              kwargs={"autocommit": True, "row_factory": dict_row, "prepare_threshold": None})
+checkpointer = PostgresSaver(_memory_pool)
+
+
+def open_memory() -> None:
+    _memory_pool.open()
+    checkpointer.setup()  # creates or migrates its tables; safe on every start
+
+
+def close_memory() -> None:
+    _memory_pool.close(timeout=1)
 
 
 def build_graph():
     g = StateGraph(AgentState)
     g.add_node("load_context", nodes.load_context)
-    g.add_node("safety_screen", nodes.safety_screen)
-    g.add_node("emergency", nodes.emergency)
-    g.add_node("supervisor", nodes.supervisor)
     g.add_node("chat", nodes.chat)
-    g.add_node("plan", nodes.plan)
-    g.add_node("doctor_handoff", nodes.doctor_handoff)
-
     g.add_edge(START, "load_context")
-    g.add_conditional_edges("load_context", routing.after_load, ["chat", "safety_screen"])
-    g.add_conditional_edges("safety_screen", routing.after_safety, ["emergency", "supervisor"])
-    g.add_conditional_edges("supervisor", routing.after_supervisor,
-                            ["chat", "plan", "doctor_handoff", "emergency"])
-    for node in ("chat", "plan", "doctor_handoff", "emergency"):
-        g.add_edge(node, END)
-    # In memory: conversations last until the backend restarts.
-    return g.compile(checkpointer=MemorySaver())
+    g.add_edge("load_context", "chat")
+    g.add_edge("chat", END)
+    return g.compile(checkpointer=checkpointer)
 
 
 graph = build_graph()
 
 
-def thread_id(mode: str, patient_id: str, doctor_id: str | None) -> str:
-    """One conversation per patient; a doctor's questions are kept separate."""
-    return f"doctor:{doctor_id}:{patient_id}" if mode == "doctor" else f"patient:{patient_id}"
+def thread_id(patient_id: str, doctor_id: str) -> str:
+    """One conversation per doctor and patient."""
+    return f"doctor:{doctor_id}:{patient_id}"
 
 
-def run_turn(mode: str, patient_id: str, doctor_id: str | None, message: str) -> dict:
-    config = {"configurable": {"thread_id": thread_id(mode, patient_id, doctor_id)}}
-    state = graph.invoke({"messages": [HumanMessage(content=message)], "mode": mode,
-                          "patient_id": patient_id, "doctor_id": doctor_id}, config)
-    return {
-        "reply": state["messages"][-1].content,
-        "route": state.get("route"),
-        "reason": state.get("reason"),
-        "intent": state.get("intent"),
-        "condition_severity": state.get("condition_severity"),
-        "request_severity": state.get("request_severity"),
-        "red_flags": state.get("red_flags", []),
-        "forced_reasons": state.get("forced_reasons", []),
-        "conditions": state.get("conditions", []),
-        "pain_score": state.get("pain_score"),
-        "case": state.get("case"),
-    }
+def run_turn(patient_id: str, doctor_id: str, message: str) -> dict:
+    thread = thread_id(patient_id, doctor_id)
+    state = graph.invoke({"messages": [HumanMessage(content=message)], "patient_id": patient_id,
+                          "doctor_id": doctor_id}, {"configurable": {"thread_id": thread}})
+    reply = state["messages"][-1].content
+    decision = {"conditions": state.get("conditions", [])}
+    with session() as db:
+        message_store.save_turn(db, thread, "doctor", patient_id, doctor_id, message, reply, decision)
+    return {"reply": reply, **decision}
