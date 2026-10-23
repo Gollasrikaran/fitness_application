@@ -7,14 +7,17 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from agent.assess import run_assessment
 from agent.main import AgentUnavailable, close_memory, open_memory, run_turn, thread_id
 from app import clinic
 from app.config import settings
 from app.db import fetch_one, pool
+from store import assessments as assessment_store
 from store import cases as case_store
 from store import messages as message_store
 from store import plans as plan_store
@@ -91,6 +94,27 @@ def chat_history(patient_id: str, doctor_id: str):
 
 
 # ── The agent's own data: plans, drafts, cases (temporary database) ──────────
+
+class AssessIn(BaseModel):
+    doctor_id: str = Field(min_length=1)
+
+
+@app.post("/patients/{patient_id}/assess")
+def assess(patient_id: str, body: AssessIn):
+    """Run the assessment: the patient's conditions and whether a doctor must
+    write the plan. Phase 5 turns it into a draft; phase 6 puts it behind the
+    doctor's "Generate plan" button."""
+    try:
+        return run_assessment(patient_id, body.doctor_id)
+    except ValueError as exc:  # unknown patient
+        raise HTTPException(404, str(exc))
+
+
+@app.get("/patients/{patient_id}/assessment")
+def latest_assessment(patient_id: str):
+    with session() as db:
+        return {"assessment": assessment_store.assessment_dict(assessment_store.latest(db, patient_id), full=True)}
+
 
 @app.get("/patients/{patient_id}/plan")
 def approved_plan(patient_id: str):

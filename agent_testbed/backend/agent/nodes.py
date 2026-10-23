@@ -5,10 +5,11 @@ import logging
 
 from langchain_core.messages import AIMessage, SystemMessage
 
-from agent.conditions import map_conditions
+from agent.conditions import load_reference, rule_findings
 from agent.llm import chat_model
 from agent.prompts import DOCTOR_CHAT, record_block
 from app import clinic
+from store import assessments as assessment_store
 from store import cases as case_store
 from store import plans as plan_store
 from store.db import session
@@ -28,14 +29,19 @@ def load_context(state: dict) -> dict:
     context = clinic.patient_context(state["patient_id"])
     if context is None:
         raise ValueError("Patient not found")
-    conditions, evidence = map_conditions(context)
-    context["agent_conditions"] = evidence
     pid = state["patient_id"]
     with session() as db:
+        # The rules' quick read of the record (no AI); the full assessment is
+        # run only when the doctor asks for a plan.
+        rules = rule_findings(context, load_reference(db))
+        context["assessment"] = assessment_store.assessment_dict(assessment_store.latest(db, pid))
         context["doctor_plan"] = plan_store.plan_dict(plan_store.latest_plan(db, pid))
         context["pending_plan"] = plan_store.proposal_dict(plan_store.pending_proposal(db, pid))
         context["open_case"] = case_store.case_dict(case_store.open_case(db, pid))
-    return {"context": context, "conditions": conditions}
+    context["agent_conditions"] = sorted({f"{f.code}: {f.where}: \"{f.quote}\"" for f in rules.findings})
+    context["agent_conditions"] += [f"unmapped {u}" for u in rules.unmapped]
+    context["agent_conditions"] += [f"warning: {w['label']} on {w['date']}" for w in rules.warnings]
+    return {"context": context, "conditions": sorted({f.code for f in rules.findings})}
 
 
 # ── chat (AI): a doctor asking about one of their patients ───────

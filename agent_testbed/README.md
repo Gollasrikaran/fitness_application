@@ -2,7 +2,9 @@
 
 A place to build and try the agent on real clinic data, without touching the
 live website. No login: toggle **Patient** or **Doctor** and pick from the
-dropdowns. The plan for what we are building is in `BUILD_PLAN.md`.
+dropdowns. The plan for what we are building is in `BUILD_PLAN.md`; where every
+piece of data comes from (clinic DB, reference DB, CSVs, aliases, what the AI
+sees) is in `DATA_FLOW.md`.
 
 - **Patient tab:** pick a patient and see the exercise plan their doctor
   approved. Read-only: patients don't chat with the agent.
@@ -21,8 +23,9 @@ load_context (clinic record, no AI) → chat (answers from the record)
 | `agent/state.py` | `AgentState` |
 | `agent/main.py` | Builds the graph and its memory; `run_turn()` is what `POST /chat` calls |
 | `agent/nodes.py` | One function per node |
-| `agent/routing.py` | Safety rules that send a patient to a doctor, whatever the AI says |
-| `agent/conditions.py` | Clinic record → our condition codes (provisional, needs clinical review) |
+| `agent/assess.py` | The assessment: rules + AI find the patient's conditions; `run_assessment()` |
+| `agent/routing.py` | Safety rules: merge the findings and decide whether a doctor must write the plan |
+| `agent/conditions.py` | Matches the record against `data/condition_aliases.csv` and `data/warning_complaints.csv` (both need clinical review) |
 | `agent/prompts.py`, `agent/llm.py` | The doctor-chat prompt; the OpenRouter model (`LLM_MODEL`, default `openai/gpt-4o-mini`) |
 
 Conversations are saved in the temporary database, so they survive a backend
@@ -87,6 +90,8 @@ Open http://localhost:5175.
 | `GET /doctors` | Doctors who have seen patients, busiest first |
 | `GET /patients?doctor_id=&search=&limit=` | Adult patients, most recently seen first; with `doctor_id`, only that doctor's |
 | `GET /patients/{id}/context` | Everything the agent knows about the patient |
+| `POST /patients/{id}/assess` | `{doctor_id}` → runs the assessment (rules + AI): conditions, severity, reasons |
+| `GET /patients/{id}/assessment` | The latest assessment |
 | `GET /patients/{id}/plan` | The patient's latest approved plan (what the Patient tab shows) |
 | `GET /patients/{id}/agent` | Approved plan, pending draft, open case (Doctor tab) |
 | `POST /chat` | `{patient_id, doctor_id, message}` → `{reply, conditions}` |

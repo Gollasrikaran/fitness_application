@@ -64,7 +64,55 @@ class SafetyRule(Base):
     usefulness_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+class ConditionAlias(Base):
+    """How the clinic writes one of our conditions (data/condition_aliases.csv).
+
+    source: long_term_condition (the clinic's condition list, exact name) |
+            health_history (questionnaire key) | text (a phrase in a diagnosis
+            or chief complaint, matched as whole words).
+    code: one of our condition codes, or bp_any / diabetes_any, which the
+    safety rules turn into controlled or not from the recent vital flags."""
+    __tablename__ = "condition_aliases"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(24))
+    phrase: Mapped[str] = mapped_column(String(128))
+    code: Mapped[str] = mapped_column(String(64))
+    note: Mapped[str] = mapped_column(Text, default="")
+
+
+class WarningComplaint(Base):
+    """A chief complaint that sends the patient to a doctor
+    (data/warning_complaints.csv), e.g. chest pain."""
+    __tablename__ = "warning_complaints"
+    phrase: Mapped[str] = mapped_column(String(128), primary_key=True)
+    label: Mapped[str] = mapped_column(String(64))
+
+
 # ── The agent's own data ────────────────────────────────────────────────────
+
+class Assessment(Base):
+    """One run of the assessment (agent/assess.py): what the rules and the AI
+    found in the patient's record, and whether a doctor must write the plan."""
+    __tablename__ = "assessments"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    patient_id: Mapped[str] = mapped_column(String(36), index=True)
+    doctor_id: Mapped[str] = mapped_column(String(36))  # who asked for it
+    codes: Mapped[list] = mapped_column(JSON, default=list)  # final condition codes
+    conditions: Mapped[list] = mapped_column(JSON, default=list)  # [{code, name, bucket, found_by, complaint_only, evidence}]
+    severity: Mapped[str] = mapped_column(String(16))  # mild | moderate | severe
+    severe_reasons: Mapped[list] = mapped_column(JSON, default=list)
+    problem: Mapped[str] = mapped_column(Text, default="")
+    body_area: Mapped[str] = mapped_column(Text, default="")
+    concerns: Mapped[list] = mapped_column(JSON, default=list)
+    missing: Mapped[list] = mapped_column(JSON, default=list)
+    unmapped: Mapped[list] = mapped_column(JSON, default=list)  # clinic conditions with no alias
+    warnings: Mapped[list] = mapped_column(JSON, default=list)  # warning complaints in recent visits
+    ai_status: Mapped[str] = mapped_column(String(16))  # ok | failed
+    ai_output: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # the AI's raw answer, for audit
+    dropped: Mapped[list] = mapped_column(JSON, default=list)  # AI findings rejected by the checks, and why
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
 
 class Message(Base):
     """Every chat turn, as shown in the app. The agent's working memory is

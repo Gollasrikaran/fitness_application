@@ -17,7 +17,7 @@ from sqlalchemy import text
 
 from store import reference
 from store.db import SCHEMA, Base, engine, session
-from store.models import Condition, Exercise, SafetyRule
+from store.models import Condition, ConditionAlias, Exercise, SafetyRule, WarningComplaint
 
 log = logging.getLogger("store.seed")
 
@@ -44,18 +44,38 @@ def init_store() -> None:
     with engine.begin() as conn:
         conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
     # Reference tables are rebuilt from their sources, so their columns follow the models.
-    for model in (SafetyRule, Exercise, Condition):
+    for model in (SafetyRule, ConditionAlias, WarningComplaint, Exercise, Condition):
         model.__table__.drop(engine, checkfirst=True)
     Base.metadata.create_all(engine)
     with engine.begin() as conn:  # keep the tables out of Supabase's public Data API
         for table in Base.metadata.sorted_tables:
             conn.execute(text(f'ALTER TABLE "{SCHEMA}"."{table.name}" ENABLE ROW LEVEL SECURITY'))
     conditions, exercises, rules = _merged()
+    aliases = _aliases(conditions)
     with session() as db:
         db.add_all(Condition(**c) for c in conditions.values())
         db.add_all(Exercise(**e) for e in exercises.values())
         db.flush()
         db.add_all(SafetyRule(**r) for r in rules.values())
+        db.add_all(ConditionAlias(**a) for a in aliases)
+        db.add_all(WarningComplaint(phrase=r["phrase"].strip().lower(), label=r["label"])
+                   for r in _rows("warning_complaints.csv"))
+
+
+# Not condition codes: the safety rules decide controlled or not (agent/conditions.py).
+ALIAS_MARKERS = {"bp_any", "diabetes_any"}
+
+
+def _aliases(conditions: dict) -> list[dict]:
+    """data/condition_aliases.csv, minus rows pointing at an unknown code."""
+    out = []
+    for r in _rows("condition_aliases.csv"):
+        if r["code"] not in conditions and r["code"] not in ALIAS_MARKERS:
+            log.warning("Alias %r -> %r dropped: unknown condition code", r["phrase"], r["code"])
+            continue
+        out.append({"source": r["source"], "phrase": r["phrase"].strip(), "code": r["code"], "note": r["note"] or ""})
+    log.info("Condition aliases loaded: %d", len(out))
+    return out
 
 
 def _from_csv() -> tuple[dict, dict, dict]:

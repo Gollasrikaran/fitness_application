@@ -20,6 +20,10 @@ pool = ConnectionPool(
     max_size=8,
     open=False,
     configure=_read_only,
+    # The pooler drops idle connections (e.g. during a long AI call): test
+    # each one before handing it out, and replace it if it's gone.
+    check=ConnectionPool.check_connection,
+    max_idle=120,
     # Required behind Supabase's connection pooler.
     kwargs={"prepare_threshold": None, "row_factory": dict_row},
 )

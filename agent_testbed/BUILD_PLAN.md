@@ -94,7 +94,21 @@ The college DB's demo GIFs are paths inside her app (`/static/demos/...`), so we
 - [x] Updated `README.md` and `FEATURES.txt`.
 - Doctor cases (`cases`) stay for now: existing cases can still be closed, but nothing opens new ones until phase 5.
 
-### Phase 4: Assessment
+### Phase 4: Assessment (built 2026-10-23, waiting on the BP/sugar decision below)
+
+**What was built:**
+- `data/condition_aliases.csv` (133 rows, from the real clinic wording) maps clinic wording to our codes. `data/warning_complaints.csv` lists the complaints that send a patient to a doctor. Both are loaded into the temp DB at startup. **They need clinical review.**
+- `agent/conditions.py` holds no condition lists: it only matches the record against the aliases. It reads the clinic's condition list, the health history, diagnoses (last 10 visits) and chief complaints (last 6 months). Unknown clinic conditions are reported as unmapped, never dropped.
+- `agent/assess.py`: the AI reads the same record and picks codes from the 28, quoting the record. A quote not found in the record, or a code outside the list, is dropped. Vital readings are left to the clinic's flags, and the AI's "not listed" findings become concerns for the doctor.
+- `agent/routing.py` → `finalize`: merges both sources and decides severity. Which conditions need a doctor comes from the database bucket.
+- Saved in the `assessments` table, with `POST /patients/{id}/assess` and `GET /patients/{id}/assessment`.
+- Fixed along the way: the clinic connection pool now tests connections, because the pooler drops idle ones during AI calls.
+
+**Dry run on 50 real patients:** 37 severe, 8 moderate, 5 mild. The AI ran on all 50, and 7 AI findings were dropped by the checks. Reasons for severe: BP not under control 18, AI rated severe 24 (the only reason for 3 patients), not listed 12 (mostly thyroid/asthma), sugar not under control 9, critical vital 7, warning complaints 13.
+
+**Decided (2026-10-23):** BP or sugar counts as "not under control" when the **latest reading** is flagged HIGH or CRITICAL by the clinic, or **any reading in the last 5 visits is CRITICAL**. ELEVATED and LOW flags don't count; before this, any sugar flag did. The AI can only say "not controlled" when the record's own words say so ("uncontrolled DM"). Re-run on 50 patients: 38 severe, 6 moderate, 6 mild. "BP not under control" fell from 18 to 11 and "sugar not under control" from 9 to 1. The largest reason is now the AI rating a case severe (24; the only reason for 5 patients).
+
+Original plan for this phase:
 This builds the first half of the new pipeline: record → rules → AI → final assessment.
 - [ ] New `Assessment` structured output from the AI:
   - condition codes, chosen only from the merged list
