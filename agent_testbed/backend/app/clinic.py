@@ -6,6 +6,7 @@ FEATURES.txt). Doctors are staff, so their names are shown.
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
@@ -86,6 +87,23 @@ def _vitals(raw) -> dict:
     return {k: raw[k] for k in _VITAL_KEYS if raw.get(k) not in (None, "")}
 
 
+def _medicine(item: dict) -> dict:
+    return {k: item[k] for k in ("name", "dosage", "frequency", "duration", "notes") if item[k] not in (None, "")}
+
+
+def _visit_entry(visit: dict, rx: dict | None, medicines_by_rx: dict) -> dict:
+    """One visit with what the doctor recorded at it, empty fields left out."""
+    entry = {"date": visit["date"], "doctor": visit["doctor"] or None, "complaint": visit["chief_complaint"],
+             "duration": visit["complaint_duration"], "vitals": _vitals(visit["vitals_json"])}
+    if rx:
+        entry |= {"diagnosis_provisional": rx["provisional"], "diagnosis_confirmed": rx["confirmed"],
+                  "medicines": medicines_by_rx.get(rx["id"], []), "patient_instructions": rx["patient_instructions"],
+                  "follow_up_at": rx["follow_up_at"], "emergency": rx["is_emergency"] or None}
+        if rx["is_referral_recommended"]:
+            entry["referral"] = {"to": rx["referral_specialist_name"], "for": rx["referral_treatment_name"]}
+    return {k: v for k, v in entry.items() if v not in (None, "", [], {})}
+
+
 def _context_queries() -> dict[str, tuple[str, str]]:
     """name -> (fetch kind, SQL). All take only %(id)s, so they run in parallel."""
     recent = _RECENT_VISIT_IDS.format(n=RECENT_VISITS)
@@ -98,12 +116,12 @@ def _context_queries() -> dict[str, tuple[str, str]]:
             SELECT count(*) AS visits, min(created_at)::date AS first_visit, max(created_at)::date AS last_visit
             FROM visit WHERE patient_id = %(id)s::uuid AND deleted_at IS NULL AND status = 'COMPLETED'"""),
         "visits": ("all", f"""
-            SELECT v.created_at::date AS date, v.chief_complaint, v.complaint_duration, v.vitals_json,
+            SELECT v.id::text AS id, v.created_at::date AS date, v.chief_complaint, v.complaint_duration, v.vitals_json,
                    trim(concat_ws(' ', u.first_name, u.last_name)) AS doctor
             FROM visit v LEFT JOIN "user" u ON u.id = v.assigned_doctor_user_id
             WHERE v.id IN ({recent}) ORDER BY v.created_at DESC"""),
         "prescriptions": ("all", f"""
-            SELECT pr.created_at::date AS date,
+            SELECT pr.id::text AS id, pr.visit_id::text AS visit_id, pr.created_at::date AS date,
                    nullif(trim(pr.provisional_diagnosis), '') AS provisional,
                    nullif(trim(pr.confirmed_diagnosis), '') AS confirmed,
                    pr.is_emergency, pr.is_referral_recommended, pr.referral_specialist_name,
@@ -113,12 +131,11 @@ def _context_queries() -> dict[str, tuple[str, str]]:
             WHERE pr.visit_id IN ({recent}) AND pr.deleted_at IS NULL
             ORDER BY pr.created_at DESC"""),
         "medicines": ("all", f"""
-            SELECT medication_name AS name, dosage, frequency, duration, notes
-            FROM prescriptionitem
-            WHERE prescription_id = (SELECT pr.id FROM prescription pr
-                                     WHERE pr.visit_id IN ({recent}) AND pr.deleted_at IS NULL
-                                     ORDER BY pr.created_at DESC LIMIT 1)
-            ORDER BY created_at"""),
+            SELECT pi.prescription_id::text AS prescription_id, pi.medication_name AS name,
+                   pi.dosage, pi.frequency, pi.duration, pi.notes
+            FROM prescriptionitem pi JOIN prescription pr ON pr.id = pi.prescription_id
+            WHERE pr.visit_id IN ({recent}) AND pr.deleted_at IS NULL
+            ORDER BY pi.created_at"""),
         "flags": ("all", f"""
             SELECT f.recorded_at::date AS date, f.metric, f.code, f.severity, f.value
             FROM visit_vital_flag f
@@ -163,7 +180,13 @@ def patient_context(patient_id: str) -> dict | None:
     visits, prescriptions = r["visits"], r["prescriptions"]
     latest_rx = prescriptions[0] if prescriptions else None
     totals, followups = r["totals"], r["followups"]
-    flags, recorded, medicines, episodes, tasks = r["flags"], r["recorded"], r["medicines"], r["episodes"], r["tasks"]
+    flags, recorded, episodes, tasks = r["flags"], r["recorded"], r["episodes"], r["tasks"]
+    medicines_by_rx = defaultdict(list)
+    for item in r["medicines"]:
+        medicines_by_rx[item["prescription_id"]].append(_medicine(item))
+    rx_by_visit = {}
+    for rx in prescriptions:  # newest first, so a visit keeps its latest prescription
+        rx_by_visit.setdefault(rx["visit_id"], rx)
 
     history = p["health_history_json"] if isinstance(p["health_history_json"], dict) else {}
     def answered(keys):
@@ -195,7 +218,9 @@ def patient_context(patient_id: str) -> dict | None:
         "history_other": answered(_HISTORY_OTHER),
         "vitals_recent": [{"date": v["date"], **_vitals(v["vitals_json"])} for v in visits],
         "vital_flags": flags,
-        "medicines": {"from": latest_rx["date"] if latest_rx else None, "items": medicines,
+        "visits": [_visit_entry(v, rx_by_visit.get(v["id"]), medicines_by_rx) for v in visits],
+        "medicines": {"from": latest_rx["date"] if latest_rx else None,
+                      "items": medicines_by_rx[latest_rx["id"]] if latest_rx else [],
                       "patient_instructions": latest_rx["patient_instructions"] if latest_rx else None,
                       "follow_up_at": latest_rx["follow_up_at"] if latest_rx else None},
         "care": {

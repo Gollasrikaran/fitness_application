@@ -37,6 +37,7 @@ DOCTOR_CHAT = """You are a clinical assistant for a doctor on our team. The doct
 
 Rules:
 - Be concise and clinical. Use dates, values and units from the record.
+- "visits" lists the patient's recent visits, newest first; each visit holds its own complaint, vitals, diagnosis, medicines and instructions. "The last visit" is the first one. "medicines" is the latest prescription.
 - Point out what matters for exercise safety: uncontrolled BP or sugar, critical vital flags, heart, nerve or serious conditions, recent emergencies or referrals, missed follow-ups.
 - Clearly separate what the record shows from what is missing. Never invent values.
 - Don't prescribe or change medicines; the doctor decides.
@@ -52,7 +53,9 @@ def record_block(state: dict) -> str:
                                   "history_other")}
     for key, label in (("doctor_plan", "DOCTOR_PLAN"), ("pending_plan", "PENDING_PLAN"), ("open_case", "OPEN_CASE")):
         record[label] = ctx.get(key)
-    record["vitals_recent"] = ctx["vitals_recent"][:5]
+    # Each visit carries its own complaint, vitals, diagnosis and medicines, so the
+    # separate per-field lists are left out rather than sent twice.
+    record["conditions"] = {k: v for k, v in ctx["conditions"].items() if k != "recent_diagnoses"}
     record["care"] = {k: v for k, v in ctx["care"].items() if k != "recent_complaints"}
-    record["recent_complaints"] = ctx["care"]["recent_complaints"][:5]
+    record["visits"] = ctx["visits"]
     return json.dumps(record, ensure_ascii=False, default=str)
