@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from agent.assess import run_assessment
+from agent.draft import generate_plan
 from agent.main import AgentUnavailable, close_memory, open_memory, run_turn, thread_id
 from app import clinic
 from app.config import settings
@@ -101,11 +101,11 @@ class AssessIn(BaseModel):
 
 @app.post("/patients/{patient_id}/assess")
 def assess(patient_id: str, body: AssessIn):
-    """Run the assessment: the patient's conditions and whether a doctor must
-    write the plan. Phase 5 turns it into a draft; phase 6 puts it behind the
-    doctor's "Generate plan" button."""
+    """The doctor's "Generate plan": assess the patient (conditions, severity),
+    then draft a plan for the doctor to review. Severe: a "doctor must write
+    the plan" item with no exercises. Returns {assessment, draft}."""
     try:
-        return run_assessment(patient_id, body.doctor_id)
+        return generate_plan(patient_id, body.doctor_id)
     except ValueError as exc:  # unknown patient
         raise HTTPException(404, str(exc))
 
@@ -176,7 +176,3 @@ def close_case(case_id: str, body: ReviewIn):
             raise HTTPException(404, "Case not found")
         case_store.close_case(case, body.doctor_id, (body.note or "").strip() or None)
         return {"status": case.status}
-
-
-#@app.get("/patients/{id}/plan")
-#def patient_pan()

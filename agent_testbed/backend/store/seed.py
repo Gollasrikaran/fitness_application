@@ -40,6 +40,14 @@ def _float(value, default=None):
     return float(value) if value not in (None, "") else default
 
 
+# Columns added to tables we keep, for databases created before them. Safe to
+# run on every start.
+ADDED_COLUMNS = (
+    f'ALTER TABLE "{SCHEMA}".plan_proposals ADD COLUMN IF NOT EXISTS assessment_id VARCHAR(36) '
+    f'REFERENCES "{SCHEMA}".assessments (id)',
+)
+
+
 def init_store() -> None:
     with engine.begin() as conn:
         conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
@@ -47,7 +55,11 @@ def init_store() -> None:
     for model in (SafetyRule, ConditionAlias, WarningComplaint, Exercise, Condition):
         model.__table__.drop(engine, checkfirst=True)
     Base.metadata.create_all(engine)
-    with engine.begin() as conn:  # keep the tables out of Supabase's public Data API
+    with engine.begin() as conn:
+        # create_all doesn't add columns to tables that already exist.
+        for statement in ADDED_COLUMNS:
+            conn.execute(text(statement))
+        # Keep the tables out of Supabase's public Data API.
         for table in Base.metadata.sorted_tables:
             conn.execute(text(f'ALTER TABLE "{SCHEMA}"."{table.name}" ENABLE ROW LEVEL SECURITY'))
     conditions, exercises, rules = _merged()

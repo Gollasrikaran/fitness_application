@@ -164,13 +164,16 @@ class PlanProposal(Base):
     """A plan drafted for a doctor to review. Nothing here reaches the
     patient until a doctor approves it, which copies it into Plan.
 
-    source: "rules" (built by store.plans, no AI) | "doctor" (the rules can't
-    draft one, e.g. a refer condition, so the doctor writes it)."""
+    source: "ai" (the AI picked the exercises, agent.draft) | "rules" (built
+    by store.plans, no AI: the AI failed or broke a rule) | "doctor" (a
+    severe case, so the doctor writes it). The severity and its reasons are
+    on the linked assessment."""
     __tablename__ = "plan_proposals"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     patient_id: Mapped[str] = mapped_column(String(36), index=True)
-    kind: Mapped[str] = mapped_column(String(16))  # starter | easier | update
-    source: Mapped[str] = mapped_column(String(16))  # rules | doctor
+    assessment_id: Mapped[str | None] = mapped_column(ForeignKey("assessments.id"), nullable=True)
+    kind: Mapped[str] = mapped_column(String(16))  # starter | update
+    source: Mapped[str] = mapped_column(String(16))  # ai | rules | doctor
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending | approved | rejected | superseded
     instructions: Mapped[str] = mapped_column(Text)
     exercises: Mapped[list] = mapped_column(JSON, default=list)

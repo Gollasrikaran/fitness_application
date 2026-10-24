@@ -3,7 +3,7 @@
 How a patient's clinic record becomes a list of our condition codes, and
 from there a decision on whether the AI may draft an exercise plan or a doctor must write it.
 
-Last checked against the code and the databases: 2026-10-23.
+Last checked against the code and the databases: 2026-10-24.
 
 ## The four sources
 
@@ -23,6 +23,11 @@ startup:      Reference DB ─┐
 
 per patient:  Clinic DB ─→ patient record ─→ aliases (rules) ─→ AI ─→ safety rules ─→ assessment
                            (app/clinic.py)   (agent/conditions.py)  (agent/assess.py) (agent/routing.py)  (Temp DB)
+
+                                                                                       │
+                           severe ─→ "doctor must write the plan" (no AI) ←────────────┤
+                           not severe ─→ AI picks from allowed exercises ─→ rule check ─→ draft (Temp DB)
+                                         (agent/draft.py)                (store/plans.py)
 ```
 
 ## 1. Startup: building the reference data
@@ -107,7 +112,7 @@ Also read, for the doctor chat and the side panel: complaint duration, instructi
 
 ## 4. The assessment, step by step
 
-`POST /patients/{id}/assess` → `agent/assess.py` → `run_assessment()`.
+`POST /patients/{id}/assess` → `agent/draft.py` → `generate_plan()`, which runs `agent/assess.py` → `run_assessment()` and then drafts the plan (section 4a).
 
 | Step | Code | AI? | What happens |
 |---|---|---|---|
@@ -122,11 +127,30 @@ Also read, for the doctor chat and the side panel: complaint duration, instructi
 - any final code has bucket `refer` in the `conditions` table (heart, pregnancy, recent surgery, acute injury, neurological, `high_bp`, `diabetes`, `other_unlisted`)
 - BP or sugar not under control: the **latest reading is flagged HIGH or CRITICAL**, or **any reading in the last 5 visits is CRITICAL** (ELEVATED and LOW don't count)
 - a critical vital flag, or an emergency visit, in the recent visits
+- a condition a doctor recorded as `SEVERE` in the clinic (`patient_condition.severity`)
 - a warning complaint in the last 6 months
 - the AI rated the case severe
 - the AI failed **and** the rules found nothing
 
 The AI can add conditions and raise severity, but never remove a condition or lower severity. If the AI call fails, the rules' result is used alone.
+
+## 4a. The plan draft
+
+Right after the assessment, `agent/draft.py` → `build_draft()` turns it into a draft in `plan_proposals`, linked by `assessment_id`. Nothing reaches the patient until a doctor approves it.
+
+| Case | `source` | What the draft holds |
+|---|---|---|
+| Severe, or any `refer` condition | `doctor` | No exercises and no AI call: "A doctor must write this plan", with the severe reasons |
+| Not severe, AI answer passes the checks | `ai` | 3–5 exercises the AI picked and ordered, at the rules' doses; a line per exercise and a reason for the doctor; simple instructions for the patient |
+| Not severe, AI failed or broke a rule | `rules` | The rule-only `starter_exercises()` plan, and why the AI draft was dropped |
+
+**What the AI is allowed:** `store/plans.py` → `candidates()` lists the exercises the safety grid allows for **every** condition (none for a `refer` condition, none marked `avoid` for any condition, and no running at age 60+ or BMI 30+), at the grid's starting dose (one step lower at 60+). The AI only chooses from that list and orders it. It never sets doses.
+
+**Checked before saving:** `violations()` rejects an unknown exercise or condition, a missing rule or `avoid` for any condition, a `refer` condition, more than 5 exercises, a duplicate, and sets or amounts outside 1..`max_sets` / `max_amount`. An AI draft that fails falls back to the rules; a rules draft that failed would become a doctor item (it can't happen with a consistent grid).
+
+**Replacing:** a new draft supersedes the pending one. For a patient with an approved plan the draft is an `update`, with `changes` (added, removed, dose changed). Once approved it is the plan the patient sees; older plans stay as history.
+
+**What it costs:** one more AI call, only when not severe: the allowed list plus the age, sex, BMI, problem, body area, conditions and concerns (~600 tokens in, ~400 out). The full record isn't sent again.
 
 ## 5. What the AI sees, and what it costs
 
@@ -170,7 +194,7 @@ Nothing is cached: every click runs the AI on the whole record again. Proposed s
 | `assessments` | Every assessment run, with evidence and the AI's raw answer | Kept |
 | `messages` | Every doctor-chat turn | Kept |
 | `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`, `checkpoint_migrations` | LangGraph's conversation memory | Kept |
-| `plan_proposals` | Plan drafts waiting for a doctor | Kept |
+| `plan_proposals` | Plan drafts waiting for a doctor (`source` ai, rules or doctor), linked to their assessment | Kept |
 | `plans` | Doctor-approved plans: what the patient sees | Kept |
 | `cases` | Concerns passed to a doctor (from the old patient chat) | Kept |
 

@@ -108,9 +108,10 @@ def _check(ai: AIAssessment, ref, record: dict) -> tuple[list[Finding], list[dic
     return kept, dropped, concerns
 
 
-def run_assessment(patient_id: str, doctor_id: str, today: date | None = None) -> dict:
+def run_assessment(patient_id: str, doctor_id: str, today: date | None = None,
+                   context: dict | None = None) -> dict:
     today = today or date.today()
-    context = clinic.patient_context(patient_id)
+    context = context or clinic.patient_context(patient_id)
     if context is None:
         raise ValueError("Patient not found")
     with session() as db:

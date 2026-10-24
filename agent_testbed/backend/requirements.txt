@@ -17,3 +17,6 @@ langgraph-checkpoint-postgres==3.2.0  # conversation memory in the temp database
 
 # Agent store (temporary database)
 SQLAlchemy==2.0.35
+
+# Tests (python -m pytest, from backend/)
+pytest==8.3.4

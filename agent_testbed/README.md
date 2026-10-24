@@ -24,6 +24,7 @@ load_context (clinic record, no AI) → chat (answers from the record)
 | `agent/main.py` | Builds the graph and its memory; `run_turn()` is what `POST /chat` calls |
 | `agent/nodes.py` | One function per node |
 | `agent/assess.py` | The assessment: rules + AI find the patient's conditions; `run_assessment()` |
+| `agent/draft.py` | The plan draft: severe → a doctor writes it; otherwise the AI picks from the allowed exercises and the rules check it; `generate_plan()` |
 | `agent/routing.py` | Safety rules: merge the findings and decide whether a doctor must write the plan |
 | `agent/conditions.py` | Matches the record against `data/condition_aliases.csv` and `data/warning_complaints.csv` (both need clinical review) |
 | `agent/prompts.py`, `agent/llm.py` | The doctor-chat prompt; the OpenRouter model (`LLM_MODEL`, default `openai/gpt-4o-mini`) |
@@ -42,7 +43,7 @@ touched. Tables are created on start.
 | `store/models.py` | Tables: reference data (conditions, exercises, safety rules) + `messages`, `cases`, `plan_proposals`, `plans` |
 | `store/seed.py` | Creates the schema and tables; rebuilds the reference data from `data/*.csv` merged with the reference DB |
 | `store/reference.py` | Reads the reference DB (`REFERENCE_DATABASE_URL`, read-only) |
-| `store/plans.py` | The rule-based plan engine (ported from medical_agent): starter, update |
+| `store/plans.py` | The plan safety rules: allowed exercises, the rule-only starter plan, `violations()`; approve / reject |
 | `store/messages.py` | Saved chat turns |
 | `store/cases.py` | Doctor cases: one open case per patient |
 
@@ -83,6 +84,15 @@ npm run dev
 
 Open http://localhost:5175.
 
+## Tests
+
+```powershell
+cd agent_testbedackend
+.venv\Scripts\python -m pytest
+```
+
+The plan and severity rules, on an in-memory copy of `data/*.csv`: no database or AI is used.
+
 ## API
 
 | Route | What it returns |
@@ -90,7 +100,7 @@ Open http://localhost:5175.
 | `GET /doctors` | Doctors who have seen patients, busiest first |
 | `GET /patients?doctor_id=&search=&limit=` | Adult patients, most recently seen first; with `doctor_id`, only that doctor's |
 | `GET /patients/{id}/context` | Everything the agent knows about the patient |
-| `POST /patients/{id}/assess` | `{doctor_id}` → runs the assessment (rules + AI): conditions, severity, reasons |
+| `POST /patients/{id}/assess` | `{doctor_id}` → "Generate plan": runs the assessment (conditions, severity, reasons) and drafts a plan for review → `{assessment, draft}` |
 | `GET /patients/{id}/assessment` | The latest assessment |
 | `GET /patients/{id}/plan` | The patient's latest approved plan (what the Patient tab shows) |
 | `GET /patients/{id}/agent` | Approved plan, pending draft, open case (Doctor tab) |

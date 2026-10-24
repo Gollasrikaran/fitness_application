@@ -1,6 +1,6 @@
 # Build plan: doctor-approved exercise plans
 
-Status as of 2026-10-23. Tick items off as they land.
+Status as of 2026-10-24. Tick items off as they land.
 
 ## What we are building
 
@@ -89,10 +89,10 @@ The college DB's demo GIFs are paths inside her app (`/static/demos/...`), so we
   - `agent/red_flags.py`
   - the "too hard" flow in `store/plans.py` (`request_easier`, `easier_exercises`, `exercises_named`) and exercise synonyms
   - the patient chat UI in the frontend
-- [x] Kept the doctor chat, `clinic.py`, `conditions.py`, the rule floor in `routing.py` (`condition_floor`), and the rule plan engine (`request_plan`, `sync_conditions` and `starter_exercises`, for phase 5).
+- [x] Kept the doctor chat, `clinic.py`, `conditions.py`, the rule floor in `routing.py` (`condition_floor`), and the rule plan engine (`starter_exercises`; `request_plan` and `sync_conditions` were replaced in phase 5).
 - [x] The Patient tab now shows only the approved plan (`GET /patients/{id}/plan`, `PatientPlan.jsx`). Phase 7 adds instructions and images.
 - [x] Updated `README.md` and `FEATURES.txt`.
-- Doctor cases (`cases`) stay for now: existing cases can still be closed, but nothing opens new ones until phase 5.
+- Doctor cases (`cases`) stay for now: existing cases can still be closed, but nothing opens new ones. Severe patients get a "doctor must write" draft instead (phase 5).
 
 ### Phase 4: Assessment (built 2026-10-23, waiting on the BP/sugar decision below)
 
@@ -126,24 +126,32 @@ This builds the first half of the new pipeline: record → rules → AI → fina
 - [ ] Use `rag_chunks` as background for less common problems: filter by `condition_code`, then keyword search. Vector search would need the embedding model behind the 1536-dimension vectors, which is unknown.
 - **Done when:** running it over 50 real patients (read-only) gives a sensible condition and severity for each, with evidence, and every refer condition is marked severe.
 
-### Phase 5: Plan drafting
-- [ ] **Severe:** create a "doctor must write plan" item (`plan_proposals` with `source = "doctor"`, linked to the assessment). There is no AI draft.
-- [ ] **Not severe:** the AI picks and orders exercises from the allowed list and writes a short reason for the doctor. Code then enforces the rules:
-  - An exercise marked `avoid` for **any** of the patient's conditions can never appear.
-  - Exercises marked `modify` keep the grid's note in the draft.
-  - Doses start at `default_sets` / `default_amount` and never exceed `max_sets` / `max_amount`.
-  - Only the 12 known exercises are allowed.
-- [ ] If the AI fails or breaks a rule, use the existing rule-only `starter_exercises` draft.
-- [ ] Add `assessment_id`, `severity` and `source = "ai"` to `plan_proposals`.
-- **Done when:** tests prove that no draft ever contains an `avoid` exercise or a dose above the maximum.
+### Phase 5: Plan drafting (done 2026-10-24)
+
+**What was built:**
+- [x] `agent/draft.py` → `build_draft()` turns an assessment into a draft; `generate_plan()` runs the assessment and then the draft. `POST /patients/{id}/assess` now returns `{assessment, draft}`.
+- [x] **Severe:** a "doctor must write the plan" item (`source = "doctor"`, no exercises, no AI call), with the severe reasons. A `refer` condition always ends here, even when it isn't marked severe.
+- [x] **Not severe:** the AI picks and orders 3–5 exercises from `store/plans.py` → `candidates()` (allowed for **every** condition, after the age/BMI rules) and writes one line per exercise for the doctor, a short reason, and simple instructions for the patient. Code then enforces the rules:
+  - The AI never sets doses: each exercise gets the grid's starting dose (one step lower at age 60+).
+  - A pick outside the allowed list, a duplicate, more than 5, or no patient instructions is a rule break.
+  - `violations()` checks every draft before it is saved: unknown exercise or condition, a missing rule or `avoid` for any condition, a `refer` condition, and doses outside 1..`max_sets` / `max_amount`.
+  - `modify` exercises keep the grid's note.
+- [x] If the AI fails or breaks a rule, the rule-only `starter_exercises()` draft is used (`source = "rules"`), and the reason says why the AI draft was dropped.
+- [x] A new draft supersedes the pending one. A patient with an approved plan gets an `update` draft with the changes listed (added, removed, dose changed). Once approved it becomes the plan the patient sees; the old one stays as history.
+- [x] `plan_proposals.assessment_id` links each draft to its assessment, which holds the severity and reasons (no copy on the draft). It is added at startup with `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, so existing drafts and plans are kept.
+- [x] `finalize()` now also treats a condition a doctor recorded as `SEVERE` in the clinic (`patient_condition.severity`) as severe. One patient has one today.
+- [x] Removed `request_plan`, `sync_conditions` and `_replace_pending`: `agent/draft.py` replaces them.
+- [x] Tests: `backend/tests/` (24, run with `python -m pytest` from `backend/`, on an in-memory copy of the CSVs, no databases or AI). They include 600 random AI answers over random condition sets and patients: no saved draft ever holds an `avoid` exercise or a dose above the maximum.
+
+**Dry run (2026-10-24, real AI, rolled back):** the 12 non-severe patients from the 50-patient run all got an AI draft with no rule violations; 3 severe patients got a "doctor must write" item. The first prompt let the AI claim medical effects in its per-exercise lines ("helps regulate menstrual cycles"); the prompt now limits them to what the exercise works and how it fits the body area.
 
 ### Phase 6: Doctor screen
 Flow: the doctor selects a patient and clicks **Generate plan**. The draft opens for editing (exercises, sets, amounts, instructions), and the doctor clicks **Approve**.
 - [ ] **Endpoints:**
-  - `POST /patients/{id}/assess` runs the pipeline.
+  - `POST /patients/{id}/assess` runs the pipeline (built in phase 5).
   - `GET /review-queue` returns pending drafts and severe patients, oldest first.
 - [ ] **Review card:** the assessment with its evidence, the draft exercises with grid notes, and approve / edit / reject. Approve and reject already exist.
-- [ ] **Doctor-written plan form:** an exercise picker limited by the grid. Picking an `avoid` exercise is blocked, and `modify` shows its note.
+- [ ] **Doctor-written plan form:** an exercise picker over the 12 exercises. The doctor has the final say: nothing is blocked. An `avoid` exercise, a dose above the maximum or an exercise with no rule for a condition shows a small warning (from `violations()`), and `modify` shows its note. No reason or note is needed to approve. (Decided 2026-10-24; the strict block applies only to AI drafts.)
 - [ ] Keep the doctor chat next to the review card.
 
 ### Phase 7: Patient plan page

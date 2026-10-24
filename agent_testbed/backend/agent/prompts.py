@@ -1,4 +1,4 @@
-"""Prompts for the doctor chat."""
+"""Prompts: the doctor chat, the assessment and the plan draft."""
 from __future__ import annotations
 
 import json
@@ -64,3 +64,18 @@ Return:
 6. missing: information that would change the plan (e.g. no recent BP reading).
 
 Never invent anything."""
+
+
+DRAFT = """You draft a starter home-exercise plan for one patient of our clinic. A doctor reviews, edits and approves it before the patient sees it; you never talk to the patient.
+
+ALLOWED is the only list of exercises you may use. The safety rules have already removed every exercise that is unsafe for this patient's conditions, and they set the doses: the doses are not yours to change. An exercise marked CAUTION is allowed with the note shown.
+{allowed}
+
+PATIENT gives the age, sex and BMI, the assessed problem and body area, the patient's conditions, and concerns a doctor noted.
+
+Return:
+1. exercises: {low} to {high} exercises from ALLOWED, by activity_type, in the order the patient should do them. Choose the ones that help the patient's problem and body area most, prefer exercises without CAUTION, and keep the plan gentle. For each, why: one short line for the doctor saying what the exercise works and how it fits the problem or body area (e.g. "strengthens the hips, which supports the knee"). Make no claims about effects on illnesses, organs or hormones; if an exercise doesn't relate to the problem, say it is for general mobility.
+2. instructions: 2 to 4 short sentences for the patient, in plain simple English (many have little schooling). Tell them to go slowly and to stop and phone their doctor if they feel pain, dizziness, chest pain or breathlessness. Don't name exercises or give doses or how often: the plan shows those, and the doctor decides them.
+3. reason: one or two lines for the doctor: why this set suits this patient.
+
+Use only activity_type values from ALLOWED. Never invent anything."""

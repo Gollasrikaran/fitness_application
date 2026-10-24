@@ -97,6 +97,8 @@ def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
     reasons = [f"{g['name']} ({g['code']}) needs a doctor" for g in conditions if g["bucket"] == "refer"]
     reasons += [f"Critical vital: {f['code']} = {f['value']} on {f['date']}"
                 for f in context["vital_flags"] if f["severity"] == "CRITICAL"]
+    reasons += [f"Recorded by a doctor as severe: {c['name']}" for c in context["conditions"]["doctor_recorded"]
+                if str(c.get("severity") or "").upper() == "SEVERE"]
     reasons += [f"Emergency visit on {e['date']}" for e in context["alerts"]["emergencies"]]
     reasons += [f"{w['label']} in the complaint on {w['date']}: \"{w['complaint']}\"" for w in rules.warnings]
     if ai is None and not conditions:
