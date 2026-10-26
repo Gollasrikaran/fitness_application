@@ -93,3 +93,24 @@ button.link { background: none; border: 0; color: var(--primary); cursor: pointe
 .actions input { flex: 1; }
 button.danger { color: var(--bad); }
 button:disabled.link { opacity: 0.4; cursor: default; }
+
+/* Doctor review (phase 6) */
+.badge.sev-mild { background: #e6f4ea; color: var(--good); }
+.badge.sev-moderate { background: #eef2ff; color: #3949ab; }
+.badge.sev-severe { background: #fdecea; color: var(--bad); }
+.assessment { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+.assessment .reasons { margin: 4px 0; padding-left: 18px; color: var(--bad); }
+.evidence { padding-left: 10px; font-size: 12px; }
+details summary { cursor: pointer; margin: 6px 0; }
+.exercises { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.exercise { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.dose { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.dose input { width: 70px; padding: 4px 6px; }
+.exercise input.small { padding: 4px 8px; }
+.warning { font-size: 12px; color: var(--warn); }
+.queue { margin: 12px 16px 0; }
+.queue-items { display: flex; gap: 8px; overflow-x: auto; margin-top: 8px; }
+.queue-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 200px; max-width: 260px;
+              background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px; cursor: pointer; text-align: left; }
+.queue-item.on { border-color: var(--primary); background: #eaf2ff; }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }

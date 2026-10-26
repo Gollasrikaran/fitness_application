@@ -75,6 +75,15 @@ def patients(doctor_id: str | None, search: str, limit: int, min_visits: int,
           "min_visits": min_visits, "min_age": min_age, "conditions": list(_HISTORY_CONDITIONS)})
 
 
+def patient_briefs(ids: list[str]) -> dict[str, dict]:
+    """Age and sex for a list of patients (e.g. the review queue), by id."""
+    if not ids:
+        return {}
+    rows = fetch_all("SELECT p.id::text AS id, p.age_years AS age, p.sex FROM patient p "
+                     "WHERE p.id = ANY(%(ids)s::uuid[])", {"ids": list(ids)})
+    return {r["id"]: r for r in rows}
+
+
 def _number(value):
     try:
         return round(float(value), 1)

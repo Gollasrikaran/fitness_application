@@ -22,7 +22,7 @@ from store import cases as case_store
 from store import messages as message_store
 from store import plans as plan_store
 from store.db import session
-from store.models import Case, PlanProposal
+from store.models import Assessment, Case, PlanProposal
 from store.seed import init_store
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -125,16 +125,59 @@ def approved_plan(patient_id: str):
 
 @app.get("/patients/{patient_id}/agent")
 def agent_data(patient_id: str):
-    """The patient's approved plan, the draft waiting for a doctor, and any open case."""
+    """The patient's approved plan, the draft waiting for a doctor (with the
+    assessment behind it), and any open case."""
     with session() as db:
+        pending = plan_store.pending_proposal(db, patient_id)
+        assessment = db.get(Assessment, pending.assessment_id) if pending and pending.assessment_id else None
         return {"plan": plan_store.plan_dict(plan_store.latest_plan(db, patient_id)),
-                "pending": plan_store.proposal_dict(plan_store.pending_proposal(db, patient_id), full=True),
+                "pending": plan_store.proposal_dict(pending, full=True),
+                "assessment": assessment_store.assessment_dict(assessment),
                 "open_case": case_store.case_dict(case_store.open_case(db, patient_id))}
+
+
+@app.get("/review-queue")
+def review_queue(doctor_id: str):
+    """Drafts this doctor generated that are waiting for review, oldest first."""
+    with session() as db:
+        items = plan_store.review_queue(db, doctor_id)
+    briefs = clinic.patient_briefs([i["patient_id"] for i in items])
+    return [{**i, "age": briefs.get(i["patient_id"], {}).get("age"), "sex": briefs.get(i["patient_id"], {}).get("sex")}
+            for i in items]
+
+
+@app.get("/exercises")
+def exercises(conditions: str = ""):
+    """All exercises for the doctor's picker, with what the safety grid says
+    for these conditions (comma-separated codes)."""
+    codes = [c for c in conditions.split(",") if c.strip()]
+    with session() as db:
+        return plan_store.exercise_catalog(db, codes)
+
+
+class ExerciseIn(BaseModel):
+    activity_type: str
+    sets: int = Field(ge=1, le=50)
+    amount: float = Field(gt=0, le=1000)
+    notes: str = Field(default="", max_length=500)
+
+
+class CheckIn(BaseModel):
+    conditions: list[str]
+    exercises: list[ExerciseIn]
+
+
+@app.post("/plans/check")
+def check_plan(body: CheckIn):
+    """Small warnings for a doctor's edit, per exercise. They never block."""
+    with session() as db:
+        return {"warnings": plan_store.doctor_warnings(db, [e.model_dump() for e in body.exercises], body.conditions)}
 
 
 class ReviewIn(BaseModel):
     doctor_id: str
     instructions: str | None = Field(default=None, max_length=4000)
+    exercises: list[ExerciseIn] | None = None  # the doctor's edit; None keeps the draft's
     note: str | None = Field(default=None, max_length=1000)
 
 
@@ -154,7 +197,13 @@ def approve_proposal(proposal_id: str, body: ReviewIn):
         instructions = (body.instructions or "").strip() or p.instructions
         if not instructions:
             raise HTTPException(422, "This draft has no plan in it: write the instructions")
-        plan = plan_store.approve(db, p, body.doctor_id, instructions, None, body.note)
+        exercises = None
+        if body.exercises is not None:  # the doctor has the final say: only input errors are refused
+            try:
+                exercises = plan_store.doctor_exercises(db, [e.model_dump() for e in body.exercises])
+            except ValueError as exc:
+                raise HTTPException(422, str(exc))
+        plan = plan_store.approve(db, p, body.doctor_id, instructions, exercises, body.note)
         return {"plan": plan_store.plan_dict(plan)}
 
 

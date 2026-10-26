@@ -10,8 +10,10 @@ becomes a Plan, which is what the patient sees and follows.
   conditions, most useful first, at the reviewed starting doses.
 - starter_exercises(): the rule-built plan (no AI), the fallback when the
   AI can't draft one.
-- violations(): why a draft breaks the rules. Every draft is checked before
-  it is saved.
+- violations(): why a draft breaks the rules. Every AI or rules draft is
+  checked before it is saved, and one that breaks them is never saved.
+- Doctor edits are different: the doctor has the final say. The grid never
+  blocks them; doctor_warnings() shows a small warning instead.
 
 Plans never get harder on their own. A "refer" condition allows no exercise:
 the doctor writes the plan.
@@ -24,7 +26,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from store.models import Condition, Exercise, Plan, PlanProposal, SafetyRule
+from store.models import Assessment, Condition, Exercise, Plan, PlanProposal, SafetyRule
 
 EXERCISES_BY_EXPERIENCE = {"beginner": 4, "intermediate": 5, "active": 7}
 # The clinic record doesn't say how active someone is: start everyone as a
@@ -198,6 +200,97 @@ def pending_superseded(db: Session, patient_id: str) -> None:
     pending = pending_proposal(db, patient_id)
     if pending is not None:
         pending.status = "superseded"
+
+
+# ── Doctor edits: the doctor has the final say ──────────────────────────────
+
+def _verdicts(db: Session, codes: list[str]) -> dict[str, dict[str, SafetyRule]]:
+    rules: dict[str, dict[str, SafetyRule]] = defaultdict(dict)
+    for r in db.scalars(select(SafetyRule).where(SafetyRule.condition_code.in_(codes))):
+        rules[r.activity_type][r.condition_code] = r
+    return rules
+
+
+def exercise_catalog(db: Session, codes: list[str]) -> list[dict]:
+    """Every exercise, for the doctor's picker, with what the grid says for
+    this patient: the strictest across the conditions ("avoid", "unreviewed"
+    when a condition has no rule for it, "modify", "safe")."""
+    rules = _verdicts(db, codes)
+    out = []
+    for ex in db.scalars(select(Exercise).order_by(Exercise.priority_order)):
+        by_condition = rules.get(ex.activity_type, {})
+        verdicts = {r.verdict for r in by_condition.values()}
+        verdict = ("avoid" if "avoid" in verdicts else "unreviewed" if not codes or set(codes) - set(by_condition)
+                   else "modify" if "modify" in verdicts else "safe")
+        notes = dict.fromkeys(r.note for r in by_condition.values() if r.verdict != "safe" and r.note)
+        out.append({"activity_type": ex.activity_type, "name": ex.display_name, "unit": ex.amount_unit,
+                    "default_sets": ex.default_sets, "default_amount": ex.default_amount, "max_sets": ex.max_sets,
+                    "max_amount": ex.max_amount, "per_side": ex.per_side, "verdict": verdict,
+                    "notes": " ".join(notes)})
+    return out
+
+
+def doctor_exercises(db: Session, items: list[dict]) -> list[dict]:
+    """The doctor's exercises as stored in a plan. Only input errors are
+    refused (ValueError): an unknown exercise, one listed twice, or a dose
+    that isn't a positive number. The grid never blocks a doctor."""
+    by_type = {e.activity_type: e for e in db.scalars(select(Exercise))}
+    out, seen = [], set()
+    for x in items:
+        ex = by_type.get(x.get("activity_type"))
+        if ex is None:
+            raise ValueError(f"Unknown exercise: {x.get('activity_type')}")
+        if ex.activity_type in seen:
+            raise ValueError(f"{ex.display_name} is listed twice")
+        seen.add(ex.activity_type)
+        sets, amount = x.get("sets"), x.get("amount")
+        if isinstance(sets, bool) or not isinstance(sets, int) or sets < 1:
+            raise ValueError(f"{ex.display_name}: sets must be a whole number, at least 1")
+        if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount <= 0:
+            raise ValueError(f"{ex.display_name}: the amount must be more than 0")
+        out.append({"activity_type": ex.activity_type, "name": ex.display_name, "unit": ex.amount_unit,
+                    "sets": sets, "amount": float(amount), "notes": (x.get("notes") or "").strip()})
+    return out
+
+
+def doctor_warnings(db: Session, exercises: list[dict], codes: list[str]) -> dict[str, list[str]]:
+    """Small warnings for the doctor, per exercise: marked avoid or not
+    reviewed for one of the patient's conditions, or a dose above the usual
+    maximum. Never blocks."""
+    names = condition_names(db, codes)
+    rules = _verdicts(db, codes)
+    by_type = {e.activity_type: e for e in db.scalars(select(Exercise))}
+    out = {}
+    for x in exercises:
+        ex = by_type.get(x.get("activity_type"))
+        if ex is None:
+            continue
+        warn = []
+        for code in codes:
+            rule = rules.get(ex.activity_type, {}).get(code)
+            if rule is None:
+                warn.append(f"Not reviewed for {names.get(code, code)}")
+            elif rule.verdict == "avoid":
+                warn.append(f"Marked avoid for {names.get(code, code)}" + (f": {rule.note}" if rule.note else ""))
+        sets, amount = x.get("sets"), x.get("amount")
+        if isinstance(sets, (int, float)) and sets > ex.max_sets:
+            warn.append(f"{sets} sets is above the usual maximum of {ex.max_sets}")
+        if isinstance(amount, (int, float)) and amount > ex.max_amount:
+            warn.append(f"{amount:g} {ex.amount_unit} is above the usual maximum of {ex.max_amount:g}")
+        if warn:
+            out[ex.activity_type] = warn
+    return out
+
+
+def review_queue(db: Session, doctor_id: str) -> list[dict]:
+    """Drafts waiting for review that this doctor generated, oldest first."""
+    rows = db.execute(select(PlanProposal, Assessment)
+                      .join(Assessment, PlanProposal.assessment_id == Assessment.id)
+                      .where(PlanProposal.status == "pending", Assessment.doctor_id == doctor_id)
+                      .order_by(PlanProposal.created_at)).all()
+    return [{"proposal_id": p.id, "patient_id": p.patient_id, "kind": p.kind, "source": p.source,
+             "severity": a.severity, "problem": a.problem, "requested_at": p.created_at.isoformat(timespec="minutes")}
+            for p, a in rows]
 
 
 # ── Doctor review ───────────────────────────────────────────────────────────

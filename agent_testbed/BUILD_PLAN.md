@@ -145,14 +145,24 @@ This builds the first half of the new pipeline: record → rules → AI → fina
 
 **Dry run (2026-10-24, real AI, rolled back):** the 12 non-severe patients from the 50-patient run all got an AI draft with no rule violations; 3 severe patients got a "doctor must write" item. The first prompt let the AI claim medical effects in its per-exercise lines ("helps regulate menstrual cycles"); the prompt now limits them to what the exercise works and how it fits the body area.
 
-### Phase 6: Doctor screen
+### Phase 6: Doctor screen (done 2026-10-24)
 Flow: the doctor selects a patient and clicks **Generate plan**. The draft opens for editing (exercises, sets, amounts, instructions), and the doctor clicks **Approve**.
-- [ ] **Endpoints:**
+
+**Decided (2026-10-24):** the doctor has the final say. The safety grid blocks only AI drafts (phase 5). For the doctor nothing is blocked: an `avoid` exercise, a dose above the usual maximum or an exercise not reviewed for one of the patient's conditions only shows a small warning, and no reason or note is needed to approve. Only input errors are refused: an unknown exercise, one listed twice, or a dose that isn't above 0.
+
+- [x] **Endpoints:**
   - `POST /patients/{id}/assess` runs the pipeline (built in phase 5).
-  - `GET /review-queue` returns pending drafts and severe patients, oldest first.
-- [ ] **Review card:** the assessment with its evidence, the draft exercises with grid notes, and approve / edit / reject. Approve and reject already exist.
-- [ ] **Doctor-written plan form:** an exercise picker over the 12 exercises. The doctor has the final say: nothing is blocked. An `avoid` exercise, a dose above the maximum or an exercise with no rule for a condition shows a small warning (from `violations()`), and `modify` shows its note. No reason or note is needed to approve. (Decided 2026-10-24; the strict block applies only to AI drafts.)
-- [ ] Keep the doctor chat next to the review card.
+  - `GET /review-queue?doctor_id=` returns the drafts this doctor generated that are waiting for review, oldest first, with severity, problem, age and sex. "Doctor must write" items are in it too.
+  - `GET /exercises?conditions=` returns the 12 exercises for the picker, with the grid's verdict for the patient (`safe`, `modify`, `avoid`, or `unreviewed` when a condition has no rule) and the notes.
+  - `POST /plans/check` returns the small warnings for an edit (`store/plans.py` → `doctor_warnings()`).
+  - `POST /proposals/{id}/approve` now takes the doctor's edited `exercises` (`doctor_exercises()`); without them the draft's are kept.
+  - `GET /patients/{id}/agent` also returns the assessment behind the pending draft.
+- [x] **Review card** (`frontend/src/AgentPanel.jsx`): a "Generate plan" / "Generate again" button (it asks before replacing a waiting draft); the assessment with a severity badge, the severe reasons, and the conditions with their evidence, concerns and missing information; "Why this draft"; the changes for an update; each exercise with editable sets, amount and patient note, its usual maximum, "each side" where it applies, Remove, and its warnings; "+ Add an exercise" (verdict shown next to each); the patient instructions; Approve, and Reject with a required reason.
+- [x] **Doctor-written plan:** the same card, starting with no exercises and a "No AI draft" note. The picker has all 12 exercises; grid problems show as warnings.
+- [x] **Review queue** at the top of the Doctor tab (`App.jsx` → `ReviewQueue`). Clicking an item opens that patient.
+- [x] The doctor chat stays next to the review card.
+- [x] Tests: `backend/tests/test_doctor.py` (12): the doctor can approve an `avoid` exercise and a dose above the maximum; only input errors are refused; warnings for `avoid`, not reviewed and over the maximum; the picker's verdicts; the queue holds only this doctor's pending drafts, oldest first.
+- **Checked end to end (2026-10-24)** on real patients through the API and a headless browser: generate, queue, warnings, approve with edits, the patient page showing the doctor's version, and "Generate again" for a patient with a plan giving an update draft. The test rows were deleted afterwards.
 
 ### Phase 7: Patient plan page
 - [ ] `GET /patients/{id}/plan` returns the latest **approved** plan only. It never returns drafts or the assessment.

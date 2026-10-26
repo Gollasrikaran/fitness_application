@@ -1,34 +1,60 @@
 import { useEffect, useState } from "react";
 import { api } from "./api.js";
 
-// Doctor tab: the agent's own data for one patient (temporary database): the
-// approved plan, the draft waiting for review, and any open doctor case. The
-// draft and case are reviewed here.
+// Doctor tab: the agent's own data for one patient (temporary database).
+// "Generate plan" assesses the patient and drafts a plan; the draft is
+// reviewed here. The doctor has the final say: exercises and doses can be
+// changed freely, and the safety grid only shows a small warning.
 
-const KIND = { starter: "First plan", easier: "Easier plan", update: "Conditions changed" };
+const KIND = { starter: "First plan", update: "Update to current plan" };
+const SOURCE = { ai: "AI draft", rules: "Rules draft", doctor: "Doctor must write" };
 const dose = (d) => (d ? `${d.sets} × ${d.amount}` : "—");
 
 export default function AgentPanel({ patientId, doctor, doctors, version, onChanged }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    setError("");
     api("GET", `/patients/${patientId}/agent`)
       .then(setData)
       .catch((e) => setError(e.message));
   }, [patientId, version]);
 
-  if (error) return <p className="error">{error}</p>;
-  if (!data) return null;
+  async function generate() {
+    if (data?.pending && !window.confirm("A draft is already waiting. Replace it with a new one?")) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api("POST", `/patients/${patientId}/assess`, { doctor_id: doctor.id });
+      onChanged();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!data) return error ? <p className="error">{error}</p> : null;
   const doctorName = (id) => doctors.find((d) => d.id === id)?.name || "a doctor";
-  const { plan, pending, open_case } = data;
+  const { plan, pending, assessment, open_case } = data;
 
   return (
     <>
+      <div className="card row-between">
+        <span className="small muted">{busy ? "Assessing the record and drafting… (about 20 s)" : "Exercise plan"}</span>
+        <button className="primary" onClick={generate} disabled={busy}>
+          {busy ? "Working…" : pending ? "Generate again" : "Generate plan"}
+        </button>
+      </div>
+      {error && <p className="error small pad">{error}</p>}
       {open_case && <CaseCard c={open_case} doctor={doctor} onChanged={onChanged} />}
-      {pending && <PendingCard p={pending} doctor={doctor} onChanged={onChanged} />}
+      {pending && (
+        <ReviewCard key={pending.id} p={pending} assessment={assessment} doctor={doctor} onChanged={onChanged} />
+      )}
       <div className="card">
-        <h3>Exercise plan</h3>
+        <h3>Current plan</h3>
         {plan ? (
           <>
             <div className="small muted">
@@ -49,10 +75,76 @@ export default function AgentPanel({ patientId, doctor, doctors, version, onChan
   );
 }
 
-function PendingCard({ p, doctor, onChanged }) {
+function AssessmentView({ a }) {
+  return (
+    <div className="assessment">
+      <div className="row-between">
+        <strong className="small">Assessment</strong>
+        <span className={`badge sev-${a.severity}`}>{a.severity}</span>
+      </div>
+      {a.problem && <p className="small">{a.problem}{a.body_area && <span className="muted"> · {a.body_area}</span>}</p>}
+      {a.severe_reasons.length > 0 && (
+        <ul className="small reasons">
+          {a.severe_reasons.map((r, i) => (
+            <li key={i}>{r}</li>
+          ))}
+        </ul>
+      )}
+      <details className="small">
+        <summary>
+          Conditions ({a.conditions.length}){a.concerns.length > 0 && ` · concerns (${a.concerns.length})`}
+        </summary>
+        {a.conditions.map((c) => (
+          <div key={c.code} className="row-item">
+            <strong>{c.name}</strong> <span className="muted">· {c.found_by}{c.complaint_only && " · from a complaint only"}</span>
+            {c.evidence.map((e, i) => (
+              <div key={i} className="muted evidence">{e}</div>
+            ))}
+          </div>
+        ))}
+        {a.concerns.map((c, i) => (
+          <div key={i} className="row-item">⚠ {c}</div>
+        ))}
+        {a.missing.length > 0 && <div className="row-item muted">Missing: {a.missing.join("; ")}</div>}
+      </details>
+    </div>
+  );
+}
+
+function ReviewCard({ p, assessment, doctor, onChanged }) {
+  const [exercises, setExercises] = useState(p.exercises);
   const [instructions, setInstructions] = useState(p.instructions);
+  const [catalog, setCatalog] = useState([]);
+  const [warnings, setWarnings] = useState({});
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    api("GET", `/exercises?conditions=${encodeURIComponent(p.conditions.join(","))}`)
+      .then(setCatalog)
+      .catch((e) => setError(e.message));
+  }, [p.conditions]);
+
+  // Small warnings from the safety grid, refreshed as the doctor edits. They never block.
+  useEffect(() => {
+    const valid = exercises.filter((e) => e.sets >= 1 && e.amount > 0);
+    const t = setTimeout(() => {
+      api("POST", "/plans/check", { conditions: p.conditions, exercises: valid.map(payload) })
+        .then((out) => setWarnings(out.warnings))
+        .catch(() => {});
+    }, 300);
+    return () => clearTimeout(t);
+  }, [exercises, p.conditions]);
+
+  const update = (i, field, value) => setExercises((xs) => xs.map((x, j) => (j === i ? { ...x, [field]: value } : x)));
+  const remove = (i) => setExercises((xs) => xs.filter((_, j) => j !== i));
+  function add(kind) {
+    const e = catalog.find((c) => c.activity_type === kind);
+    if (!e) return;
+    const notes = e.verdict === "modify" ? e.notes : "";
+    setExercises((xs) => [...xs, { activity_type: kind, name: e.name, unit: e.unit, sets: e.default_sets,
+                                   amount: e.default_amount, notes }]);
+  }
 
   async function act(path, body) {
     setError("");
@@ -64,44 +156,95 @@ function PendingCard({ p, doctor, onChanged }) {
     }
   }
 
+  const unused = catalog.filter((c) => !exercises.some((e) => e.activity_type === c.activity_type));
+  const verdictOf = (kind) => catalog.find((c) => c.activity_type === kind);
   return (
-    <div className="card notice priority">
+    <div className={`card notice ${p.source === "doctor" ? "priority" : "routine"}`}>
       <div className="row-between">
         <strong>Plan to review</strong>
-        <span className={`badge ${p.source === "doctor" ? "priority" : "routine"}`}>{KIND[p.kind]}</span>
+        <span>
+          <span className={`badge ${p.source === "doctor" ? "priority" : "routine"}`}>{SOURCE[p.source] || p.source}</span>{" "}
+          <span className="badge">{KIND[p.kind] || p.kind}</span>
+        </span>
       </div>
-      <p className="small pre">{p.reason}</p>
-      {p.patient_note && <p className="small">Patient said: “{p.patient_note}”</p>}
+      {assessment && <AssessmentView a={assessment} />}
+      {p.source === "doctor" ? (
+        <p className="small">No AI draft for this patient. Add exercises below and write the instructions.</p>
+      ) : (
+        <details className="small">
+          <summary>Why this draft</summary>
+          <p className="pre">{p.reason}</p>
+        </details>
+      )}
       {p.changes.length > 0 && (
-        <table>
+        <table className="small">
           <tbody>
             {p.changes.map((c, i) => (
               <tr key={i}>
                 <td>{c.name}</td>
-                <td>{dose(c.from)} → {dose(c.to)}</td>
-                <td className="small muted">{c.note}</td>
+                <td>
+                  {dose(c.from)} → {dose(c.to)}
+                </td>
+                <td className="muted">{c.note}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      {p.exercises.map((e, i) => (
-        <div key={i} className="small row-item">
-          • {e.name}: {e.sets} × {e.amount} {e.unit} {e.notes && <span className="muted">({e.notes})</span>}
-        </div>
-      ))}
+
+      <div className="exercises">
+        {exercises.map((e, i) => (
+          <div key={e.activity_type} className="exercise">
+            <div className="row-between">
+              <strong className="small">{e.name}</strong>
+              <button className="link danger small" onClick={() => remove(i)}>
+                Remove
+              </button>
+            </div>
+            <div className="dose small">
+              <input type="number" min="1" step="1" value={e.sets}
+                     onChange={(ev) => update(i, "sets", parseInt(ev.target.value, 10) || 0)} />
+              <span>sets ×</span>
+              <input type="number" min="0" step="any" value={e.amount}
+                     onChange={(ev) => update(i, "amount", parseFloat(ev.target.value) || 0)} />
+              <span>
+                {e.unit}
+                {verdictOf(e.activity_type)?.per_side && " each side"}
+              </span>
+              {verdictOf(e.activity_type) && (
+                <span className="muted">
+                  usual max {verdictOf(e.activity_type).max_sets} × {verdictOf(e.activity_type).max_amount}
+                </span>
+              )}
+            </div>
+            <input className="small" value={e.notes} placeholder="Note for the patient (optional)"
+                   onChange={(ev) => update(i, "notes", ev.target.value)} />
+            {(warnings[e.activity_type] || []).map((w, j) => (
+              <div key={j} className="warning">⚠ {w}</div>
+            ))}
+          </div>
+        ))}
+        {exercises.length === 0 && <div className="small muted">No exercises yet.</div>}
+        <select className="small" value="" onChange={(ev) => add(ev.target.value)} disabled={!unused.length}>
+          <option value="">+ Add an exercise…</option>
+          {unused.map((c) => (
+            <option key={c.activity_type} value={c.activity_type}>
+              {c.name}
+              {c.verdict === "safe" ? "" : ` (${c.verdict})`}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <label className="sub">
         Instructions for the patient
-        <textarea
-          rows={3}
-          value={instructions}
-          onChange={(e) => setInstructions(e.target.value)}
-          placeholder={p.source === "doctor" ? "The rules couldn't draft this one: write the plan" : ""}
-        />
+        <textarea rows={3} value={instructions} onChange={(e) => setInstructions(e.target.value)}
+                  placeholder={p.source === "doctor" ? "Write the plan for the patient" : ""} />
       </label>
       {error && <p className="error small">{error}</p>}
       <div className="actions">
-        <button className="primary" onClick={() => act("approve", { instructions, note: note || null })}>
+        <button className="primary" disabled={!instructions.trim()}
+                onClick={() => act("approve", { instructions, exercises: exercises.map(payload), note: note || null })}>
           Approve
         </button>
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (required to reject)" />
@@ -112,6 +255,8 @@ function PendingCard({ p, doctor, onChanged }) {
     </div>
   );
 }
+
+const payload = (e) => ({ activity_type: e.activity_type, sets: e.sets, amount: e.amount, notes: e.notes || "" });
 
 function CaseCard({ c, doctor, onChanged }) {
   const [note, setNote] = useState("");

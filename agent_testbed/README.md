@@ -9,7 +9,8 @@ sees) is in `DATA_FLOW.md`.
 - **Patient tab:** pick a patient and see the exercise plan their doctor
   approved. Read-only: patients don't chat with the agent.
 - **Doctor tab:** pick a doctor, then one of their patients. Ask the agent
-  about that patient, and review plan drafts. The right-hand panel shows
+  about that patient, click **Generate plan**, then edit and approve or reject
+  the draft. Drafts waiting for review are listed at the top. The right-hand panel shows
   exactly what the agent knows about the patient (listed in `FEATURES.txt`).
 
 The doctor's questions are answered by the agent in `backend/agent/` (LangGraph):
@@ -50,7 +51,9 @@ touched. Tables are created on start.
 LangGraph's checkpointer keeps its own tables (`checkpoint*`) in the same schema.
 
 Every plan is a draft until a doctor approves it. In the **Doctor** tab the side
-panel shows the patient's draft and open case, with Approve / Reject / Close.
+panel shows the assessment and the draft. The doctor can change exercises and
+doses freely: the safety grid only shows a small warning there (it blocks only
+AI drafts). Approve / Reject (with a reason) / Close case.
 
 ## Data
 
@@ -103,8 +106,11 @@ The plan and severity rules, on an in-memory copy of `data/*.csv`: no database o
 | `POST /patients/{id}/assess` | `{doctor_id}` → "Generate plan": runs the assessment (conditions, severity, reasons) and drafts a plan for review → `{assessment, draft}` |
 | `GET /patients/{id}/assessment` | The latest assessment |
 | `GET /patients/{id}/plan` | The patient's latest approved plan (what the Patient tab shows) |
-| `GET /patients/{id}/agent` | Approved plan, pending draft, open case (Doctor tab) |
+| `GET /patients/{id}/agent` | Approved plan, pending draft with its assessment, open case (Doctor tab) |
+| `GET /review-queue?doctor_id=` | Drafts this doctor generated that are waiting for review, oldest first |
+| `GET /exercises?conditions=` | The 12 exercises for the doctor's picker, with the grid's verdict for those conditions |
+| `POST /plans/check` | `{conditions, exercises}` → small warnings per exercise (never blocks) |
 | `POST /chat` | `{patient_id, doctor_id, message}` → `{reply, conditions}` |
 | `GET /chat/history?patient_id=&doctor_id=` | The saved conversation, oldest first |
-| `POST /proposals/{id}/approve` / `reject` | `{doctor_id, instructions?, note?}` (reject needs a note) |
+| `POST /proposals/{id}/approve` / `reject` | `{doctor_id, instructions?, exercises?, note?}`; `exercises` is the doctor's edit (reject needs a note) |
 | `POST /cases/{id}/close` | `{doctor_id, note?}` |

@@ -5,7 +5,7 @@ import PatientPlan from "./PatientPlan.jsx";
 
 // No login. Patient tab: pick a patient and see the plan their doctor
 // approved (patients don't chat with the agent). Doctor tab: pick a doctor and
-// one of their patients, ask the agent about them, and review plans. The
+// one of their patients, ask the agent about them, generate and review plans. The
 // right-hand panel shows exactly what the agent knows about that patient.
 
 const sexShort = (s) => ({ FEMALE: "F", MALE: "M", OTHER: "O" })[s] || "?";
@@ -111,6 +111,9 @@ export default function App() {
         </label>
       </div>
       {error && <p className="error pad">{error}</p>}
+      {mode === "doctor" && doctor && (
+        <ReviewQueue doctor={doctor} version={version} current={patientId} onOpen={setPatientId} />
+      )}
 
       {!patientId ? (
         <p className="muted center">
@@ -129,6 +132,36 @@ export default function App() {
           </aside>
         </div>
       )}
+    </div>
+  );
+}
+
+// Drafts this doctor generated that are waiting for review, oldest first.
+function ReviewQueue({ doctor, version, current, onOpen }) {
+  const [items, setItems] = useState([]);
+
+  useEffect(() => {
+    api("GET", `/review-queue?doctor_id=${doctor.id}`)
+      .then(setItems)
+      .catch(() => setItems([]));
+  }, [doctor.id, version]);
+
+  if (!items.length) return null;
+  return (
+    <div className="card queue">
+      <strong className="small">Waiting for your review ({items.length})</strong>
+      <div className="queue-items">
+        {items.map((q) => (
+          <button key={q.proposal_id} className={`queue-item ${q.patient_id === current ? "on" : ""}`}
+                  onClick={() => onOpen(q.patient_id)}>
+            <span className={`badge sev-${q.severity}`}>{q.source === "doctor" ? "doctor must write" : q.severity}</span>
+            <span className="small">
+              #{q.patient_id.slice(0, 8)} · {q.age ?? "?"} {sexShort(q.sex)}
+            </span>
+            <span className="small muted ellipsis">{q.problem || "—"}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
