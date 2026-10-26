@@ -118,9 +118,12 @@ def latest_assessment(patient_id: str):
 
 @app.get("/patients/{patient_id}/plan")
 def approved_plan(patient_id: str):
-    """What the patient sees: the latest plan a doctor approved, nothing else."""
+    """What the patient sees: the latest plan a doctor approved, nothing else
+    (never a draft, the conditions or the assessment)."""
     with session() as db:
-        return {"plan": plan_store.plan_dict(plan_store.latest_plan(db, patient_id))}
+        plan = plan_store.latest_plan(db, patient_id)
+        doctor = clinic.doctor_name(plan.doctor_id) if plan else None
+        return {"plan": plan_store.patient_plan(db, plan, doctor)}
 
 
 @app.get("/patients/{patient_id}/agent")
@@ -144,6 +147,14 @@ def review_queue(doctor_id: str):
     briefs = clinic.patient_briefs([i["patient_id"] for i in items])
     return [{**i, "age": briefs.get(i["patient_id"], {}).get("age"), "sex": briefs.get(i["patient_id"], {}).get("sex")}
             for i in items]
+
+
+@app.get("/review-summary")
+def review_summary(doctor_id: str | None = None):
+    """How doctors handled the drafts: approved as drafted, edited, rejected,
+    and what they changed. With doctor_id, only that doctor's reviews."""
+    with session() as db:
+        return plan_store.review_summary(db, doctor_id)
 
 
 @app.get("/exercises")

@@ -87,8 +87,19 @@ button.link { background: none; border: 0; color: var(--primary); cursor: pointe
   .workspace { grid-template-columns: 1fr; height: auto; }
   .msg { max-width: 95%; }
 }
-.patient-plan { max-width: 720px; margin: 16px auto; font-size: 17px; }
-.patient-plan li { margin: 10px 0; }
+/* Patient plan page (phase 7): large text, one column, for small phones */
+.patient-plan { max-width: 640px; margin: 16px auto; padding: 0 16px; font-size: 19px; line-height: 1.5; }
+.patient-plan h1 { font-size: 26px; margin-bottom: 4px; }
+.patient-plan .from { color: var(--muted); margin: 0 0 12px; }
+.patient-plan.empty { text-align: center; margin-top: 64px; font-size: 21px; }
+.plan-note { background: #eaf2ff; border-radius: 10px; padding: 12px 14px; margin: 0 0 16px; }
+.ex-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+.ex-card h2 { font-size: 22px; margin: 0 0 6px; }
+.ex-card .dose { font-size: 21px; font-weight: 600; color: var(--primary); margin: 0 0 4px; }
+.ex-card .rest { color: var(--muted); margin: 0; }
+.ex-card .doc-note { background: #fff8e6; border-radius: 8px; padding: 8px 10px; margin: 10px 0 0; }
+.ex-card .steps { margin: 12px 0 0; padding-left: 26px; }
+.ex-card .steps li { margin: 8px 0; }
 .notice.routine { border-color: var(--primary); }
 .actions input { flex: 1; }
 button.danger { color: var(--bad); }

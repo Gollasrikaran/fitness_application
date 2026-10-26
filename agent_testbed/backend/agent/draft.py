@@ -82,26 +82,6 @@ def _from_ai(answer: AIDraft, allowed: list[dict]) -> tuple[list[dict], list[str
     return exercises, whys, problems
 
 
-def _changes(old: list[dict], new: list[dict]) -> list[dict]:
-    """What an update changes in the patient's current plan."""
-    before = {e["activity_type"]: e for e in old}
-    after = {e["activity_type"]: e for e in new}
-    out = []
-    for kind, e in before.items():
-        if kind not in after:
-            out.append({"activity_type": kind, "name": e["name"], "from": {"sets": e["sets"], "amount": e["amount"]},
-                        "to": None, "note": "Removed"})
-    for kind, e in after.items():
-        was = before.get(kind)
-        dose = {"sets": e["sets"], "amount": e["amount"]}
-        if was is None:
-            out.append({"activity_type": kind, "name": e["name"], "from": None, "to": dose, "note": "Added"})
-        elif (was["sets"], was["amount"]) != (e["sets"], e["amount"]):
-            out.append({"activity_type": kind, "name": e["name"], "from": {"sets": was["sets"], "amount": was["amount"]},
-                        "to": dose, "note": "Dose changed"})
-    return out
-
-
 def build_draft(db: Session, patient_id: str, assessment: dict, patient: dict,
                 ask_ai: Callable[[dict, dict, list[dict]], AIDraft] = _ask_ai) -> PlanProposal:
     """Save and return the draft for one assessment. `patient` is
@@ -116,7 +96,7 @@ def build_draft(db: Session, patient_id: str, assessment: dict, patient: dict,
         proposal = PlanProposal(
             patient_id=patient_id, assessment_id=assessment["id"], kind="update" if current else "starter",
             source=source, instructions=instructions, exercises=exercises, reason=reason, conditions=codes,
-            changes=_changes(current.exercises, exercises) if current and exercises else [],
+            changes=plan_store.exercise_changes(current.exercises, exercises) if current and exercises else [],
             based_on_plan_id=current.id if current else None)
         db.add(proposal)
         db.flush()

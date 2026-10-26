@@ -1,6 +1,6 @@
 # Build plan: doctor-approved exercise plans
 
-Status as of 2026-10-24. Tick items off as they land.
+Status as of 2026-10-26. Tick items off as they land.
 
 ## What we are building
 
@@ -164,16 +164,24 @@ Flow: the doctor selects a patient and clicks **Generate plan**. The draft opens
 - [x] Tests: `backend/tests/test_doctor.py` (12): the doctor can approve an `avoid` exercise and a dose above the maximum; only input errors are refused; warnings for `avoid`, not reviewed and over the maximum; the picker's verdicts; the queue holds only this doctor's pending drafts, oldest first.
 - **Checked end to end (2026-10-24)** on real patients through the API and a headless browser: generate, queue, warnings, approve with edits, the patient page showing the doctor's version, and "Generate again" for a patient with a plan giving an update draft. The test rows were deleted afterwards.
 
-### Phase 7: Patient plan page
-- [ ] `GET /patients/{id}/plan` returns the latest **approved** plan only. It never returns drafts or the assessment.
-- [ ] **Read-only patient tab, in English:** each exercise with sets × amount, per side, rest time, step-by-step instructions and demo images, plus the approving doctor and date. Nothing else.
-- [ ] Large text and simple layout, readable on a low-end phone.
-- [ ] If there is no approved plan: "Your doctor hasn't shared a plan yet."
+### Phase 7: Patient plan page (done 2026-10-26)
+- [x] `GET /patients/{id}/plan` returns the latest **approved** plan only (`store/plans.py` → `patient_plan()`). It never returns drafts, the conditions or the assessment: just the doctor's name, the date, the doctor's instructions and the exercises.
+- [x] Each exercise carries the doses the doctor approved, and its fixed details looked up from `exercises` when the plan is read: the dose in plain words ("2 sets × 5 repetitions", "2 sets × hold 10 seconds, each side", "1 km"), the rest between sets (left out for one set or no rest), the step-by-step instructions, and the doctor's note. Walking and Running have no steps in the data, so only the dose shows.
+- [x] The approving doctor's name comes from the clinic DB (`app/clinic.py` → `doctor_name()`).
+- [x] **Read-only patient tab, in English** (`frontend/src/PatientPlan.jsx`): large text, one column, one card per exercise. Checked at 360px wide on real data.
+- [x] If there is no approved plan: "Your doctor hasn't shared a plan yet."
+- Images and videos are not part of this work.
+- [x] Tests: `backend/tests/test_patient_plan.py` (8): nothing before approval, a rejected draft never shows, the newest approved plan wins, only plan fields are returned, details and plain-word doses, no steps or rest still shows, and an exercise later removed from the table still shows.
 
-### Phase 8: Testing before real use
-- [ ] Unit tests for the rules: no `avoid` exercises, dose caps, refer → doctor, unknown → `other_unlisted`, the AI can never lower severity.
-- [ ] A read-only dry run over a sample of real patients, with a report of severity counts and the most common conditions.
-- [ ] A doctor reviews a batch of drafts, and their edits and rejections are recorded.
+### Phase 8: Testing before real use (in progress, 2026-10-26)
+- [x] Unit tests for the rules (`backend/tests/test_safety.py`, 25): rules-severe stays severe when the AI says mild (critical vital, emergency, warning complaint, BP not under control); BP and sugar control follow the flags (latest HIGH or any CRITICAL; ELEVATED, LOW, an older HIGH or no reading don't count); warning complaints within 6 months and as whole words; the AI quote checks; and 500 random cases where no AI answer lowers severity or removes a rule condition. Already covered before: no `avoid`, dose caps, refer → doctor, unknown → `other_unlisted`. 70 tests in all.
+- [x] **Dry run** (`backend/scripts/dry_run.py`, 2026-10-26): 50 random adults from the 500 most recently seen (seed 8), ~61 AI calls. 39 severe, 8 moderate, 3 mild; 11 AI drafts, all passing the grid; 0 AI failures; 5 AI findings dropped. Drafts deleted afterwards; assessments kept as `doctor_id = dry-run-p8`. Found:
+  - **Bug:** "knee joint pain" also matches the `joint pain` → `other_unlisted` alias, making the patient severe (2 of 50 for this alone). Proposed fix: keep only the longest alias match over the same words. Not changed yet.
+  - **To decide:** time-bound conditions (pregnancy, recent surgery, acute injury) count from any of the last 10 visits, however old (2 patients flagged pregnant 10–11 months after the diagnosis).
+  - **To decide:** the AI made 3 patients severe for "elevated BP" alone while the clinic's flags say controlled.
+  - **To decide (clinical):** dizziness and tingling as warning complaints: 13 patients severe, 4 for this alone.
+  - **Alias gaps:** `LBA`, `acute lumbago`, `HT`, bare `DJD`.
+- [ ] A doctor reviews a batch of drafts. Ready to record: `GET /review-summary?doctor_id=` (`store/plans.py` → `review_summary()`) counts drafts approved as drafted, approved with edits or rejected (by source), the exercises doctors added or removed, doses raised or lowered, changed instructions, and rejection reasons.
 - [ ] A clinician signs off the merged conditions, rules and exercises.
 
 ## Decisions (2026-10-23)

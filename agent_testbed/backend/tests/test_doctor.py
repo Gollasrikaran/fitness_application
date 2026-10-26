@@ -83,3 +83,32 @@ def test_queue_holds_this_doctors_pending_drafts_oldest_first(db):
     assert [q["patient_id"] for q in queue] == ["p0", "p2"]
     db.scalars(select(PlanProposal).where(PlanProposal.patient_id == "p0")).one().status = "approved"
     assert [q["patient_id"] for q in plans.review_queue(db, "d1")] == ["p2"]
+
+
+def test_review_summary_counts_what_doctors_changed(db):
+    def draft(source, exercises):
+        p = PlanProposal(patient_id="p1", kind="starter", source=source, instructions="Daily.",
+                         exercises=plans.doctor_exercises(db, exercises), reason="", conditions=[])
+        db.add(p)
+        db.flush()
+        return p
+
+    plans.approve(db, draft("ai", [item("walk", 1, 1)]), "d1", None, None, None)  # as drafted
+    edited = draft("ai", [item("walk", 1, 1), item("glute_bridge", 2, 5)])
+    plans.approve(db, edited, "d1", "Daily, slowly.",
+                  plans.doctor_exercises(db, [item("walk", 1, 2), item("calf_stretch", 2, 10)]), None)
+    plans.reject(draft("rules", [item("walk", 1, 1)]), "d2", "Patient can't walk far")
+    plans.approve(db, draft("doctor", []), "d1", "Rest.", plans.doctor_exercises(db, [item("walk", 1, 1)]), None)
+    draft("ai", [item("walk", 1, 1)])  # still waiting: not counted
+    db.flush()
+
+    out = plans.review_summary(db)
+    assert out["by_source"]["ai"] == {"reviewed": 2, "approved_as_drafted": 1, "approved_with_edits": 1, "rejected": 0}
+    assert out["by_source"]["rules"]["rejected"] == 1
+    assert out["doctor_written_approved"] == 1
+    assert [x["name"] for x in out["added"]] == ["Wall Calf Stretch"]
+    assert [x["name"] for x in out["removed"]] == ["Glute Bridge"]
+    assert out["dose_raised"] == 1 and out["dose_lowered"] == 0 and out["instructions_changed"] == 1
+    assert out["rejections"] == [{"source": "rules", "note": "Patient can't walk far"}]
+    assert plans.review_summary(db, "d2")["by_source"] == {"rules": {"reviewed": 1, "approved_as_drafted": 0,
+                                                                     "approved_with_edits": 0, "rejected": 1}}

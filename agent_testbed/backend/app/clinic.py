@@ -75,6 +75,16 @@ def patients(doctor_id: str | None, search: str, limit: int, min_visits: int,
           "min_visits": min_visits, "min_age": min_age, "conditions": list(_HISTORY_CONDITIONS)})
 
 
+def doctor_name(doctor_id: str) -> str | None:
+    """A doctor's name (staff, so shown), or None for an unknown id."""
+    try:
+        row = fetch_one("""SELECT trim(concat_ws(' ', first_name, last_name)) AS name FROM "user"
+                           WHERE id = %(id)s::uuid AND role = 'DOCTOR'""", {"id": doctor_id})
+    except Exception:  # not a clinic id (e.g. a test doctor)
+        return None
+    return (row or {}).get("name") or None
+
+
 def patient_briefs(ids: list[str]) -> dict[str, dict]:
     """Age and sex for a list of patients (e.g. the review queue), by id."""
     if not ids:

@@ -7,7 +7,9 @@ piece of data comes from (clinic DB, reference DB, CSVs, aliases, what the AI
 sees) is in `DATA_FLOW.md`.
 
 - **Patient tab:** pick a patient and see the exercise plan their doctor
-  approved. Read-only: patients don't chat with the agent.
+  approved: each exercise's sets and repetitions (or hold time), rest and
+  steps, in large text for small phones. Read-only: patients don't chat with
+  the agent.
 - **Doctor tab:** pick a doctor, then one of their patients. Ask the agent
   about that patient, click **Generate plan**, then edit and approve or reject
   the draft. Drafts waiting for review are listed at the top. The right-hand panel shows
@@ -96,6 +98,13 @@ cd agent_testbedackend
 
 The plan and severity rules, on an in-memory copy of `data/*.csv`: no database or AI is used.
 
+Dry run on real patients (reads the clinic DB, writes only to the temp DB; about one AI call per patient):
+
+```powershell
+cd agent_testbedackend
+.venv\Scripts\python -m scripts.dry_run --n 50 --out dry_run.json
+```
+
 ## API
 
 | Route | What it returns |
@@ -105,9 +114,10 @@ The plan and severity rules, on an in-memory copy of `data/*.csv`: no database o
 | `GET /patients/{id}/context` | Everything the agent knows about the patient |
 | `POST /patients/{id}/assess` | `{doctor_id}` → "Generate plan": runs the assessment (conditions, severity, reasons) and drafts a plan for review → `{assessment, draft}` |
 | `GET /patients/{id}/assessment` | The latest assessment |
-| `GET /patients/{id}/plan` | The patient's latest approved plan (what the Patient tab shows) |
+| `GET /patients/{id}/plan` | The patient's latest approved plan (what the Patient tab shows): doctor's name, date, instructions, and each exercise's dose in plain words, rest, steps and the doctor's note |
 | `GET /patients/{id}/agent` | Approved plan, pending draft with its assessment, open case (Doctor tab) |
 | `GET /review-queue?doctor_id=` | Drafts this doctor generated that are waiting for review, oldest first |
+| `GET /review-summary?doctor_id=` | How doctors handled the drafts: approved as drafted, edited or rejected, and what they changed |
 | `GET /exercises?conditions=` | The 12 exercises for the doctor's picker, with the grid's verdict for those conditions |
 | `POST /plans/check` | `{conditions, exercises}` → small warnings per exercise (never blocks) |
 | `POST /chat` | `{patient_id, doctor_id, message}` → `{reply, conditions}` |

@@ -122,7 +122,7 @@ export default function App() {
             : "Pick a patient to see the plan their doctor approved."}
         </p>
       ) : mode === "patient" ? (
-        <PatientPlan key={patientId} patientId={patientId} doctors={doctors} />
+        <PatientPlan key={patientId} patientId={patientId} />
       ) : (
         <div className="workspace">
           <Chat key={`${doctorId}-${patientId}`} patientId={patientId} doctor={doctor} onReply={bump} />
