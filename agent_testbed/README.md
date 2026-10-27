@@ -2,7 +2,7 @@
 
 A place to build and try the agent on real clinic data, without touching the
 live website. No login: toggle **Patient** or **Doctor** and pick from the
-dropdowns. The plan for what we are building is in `BUILD_PLAN.md`; where every
+dropdowns. The plan for what we are building is in `BUILD_PLAN.md`, open bugs and decisions in `KNOWN_ISSUES.md`, and patients to test by hand in `MANUAL_TESTING.md`; where every
 piece of data comes from (clinic DB, reference DB, CSVs, aliases, what the AI
 sees) is in `DATA_FLOW.md`.
 

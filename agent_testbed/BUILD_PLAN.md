@@ -174,6 +174,8 @@ Flow: the doctor selects a patient and clicks **Generate plan**. The draft opens
 - [x] Tests: `backend/tests/test_patient_plan.py` (8): nothing before approval, a rejected draft never shows, the newest approved plan wins, only plan fields are returned, details and plain-word doses, no steps or rest still shows, and an exercise later removed from the table still shows.
 
 ### Phase 8: Testing before real use (in progress, 2026-10-26)
+Open bugs and decisions found so far are listed in `KNOWN_ISSUES.md`.
+
 - [x] Unit tests for the rules (`backend/tests/test_safety.py`, 25): rules-severe stays severe when the AI says mild (critical vital, emergency, warning complaint, BP not under control); BP and sugar control follow the flags (latest HIGH or any CRITICAL; ELEVATED, LOW, an older HIGH or no reading don't count); warning complaints within 6 months and as whole words; the AI quote checks; and 500 random cases where no AI answer lowers severity or removes a rule condition. Already covered before: no `avoid`, dose caps, refer → doctor, unknown → `other_unlisted`. 70 tests in all.
 - [x] **Dry run** (`backend/scripts/dry_run.py`, 2026-10-26): 50 random adults from the 500 most recently seen (seed 8), ~61 AI calls. 39 severe, 8 moderate, 3 mild; 11 AI drafts, all passing the grid; 0 AI failures; 5 AI findings dropped. Drafts deleted afterwards; assessments kept as `doctor_id = dry-run-p8`. Found:
   - **Bug:** "knee joint pain" also matches the `joint pain` → `other_unlisted` alias, making the patient severe (2 of 50 for this alone). Proposed fix: keep only the longest alias match over the same words. Not changed yet.
