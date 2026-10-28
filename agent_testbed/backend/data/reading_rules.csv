@@ -1,0 +1,5 @@
+metric,band,sys_from,dia_from,action,field,values,note
+bp,140-159/90-99,140,90,block,exercise_type,isometric,"Holding exercises raise BP during the hold: left out at BP {reading}."
+bp,140-159/90-99,140,90,block,intensity,vigorous,"Vigorous exercise left out at BP {reading}: moderate effort only."
+bp,160-179/100-109,160,100,allow_only,exercise_type,aerobic|breathing|mobility,"At BP {reading}: walking-type, breathing and gentle mobility only."
+bp,180/110 or above,180,110,allow_only,exercise_type,,"BP {reading} is 180/110 or above: no exercise plan; a doctor decides."

@@ -51,7 +51,7 @@ export default function AgentPanel({ patientId, doctor, doctors, version, onChan
       {error && <p className="error small pad">{error}</p>}
       {open_case && <CaseCard c={open_case} doctor={doctor} onChanged={onChanged} />}
       {pending && (
-        <ReviewCard key={pending.id} p={pending} assessment={assessment} doctor={doctor} onChanged={onChanged} />
+        <ReviewCard key={pending.id} p={pending} patientId={patientId} assessment={assessment} doctor={doctor} onChanged={onChanged} />
       )}
       <div className="card">
         <h3>Current plan</h3>
@@ -83,6 +83,12 @@ function AssessmentView({ a }) {
         <span className={`badge sev-${a.severity}`}>{a.severity}</span>
       </div>
       {a.problem && <p className="small">{a.problem}{a.body_area && <span className="muted"> · {a.body_area}</span>}</p>}
+      {a.readings && "bp" in a.readings && (
+        <p className="small muted">
+          BP used for the plan:{" "}
+          {a.readings.bp ? `${a.readings.bp.sys}/${a.readings.bp.dia} on ${a.readings.bp.date}` : "no reading in the last 90 days"}
+        </p>
+      )}
       {a.severe_reasons.length > 0 && (
         <ul className="small reasons">
           {a.severe_reasons.map((r, i) => (
@@ -111,7 +117,7 @@ function AssessmentView({ a }) {
   );
 }
 
-function ReviewCard({ p, assessment, doctor, onChanged }) {
+function ReviewCard({ p, patientId, assessment, doctor, onChanged }) {
   const [exercises, setExercises] = useState(p.exercises);
   const [instructions, setInstructions] = useState(p.instructions);
   const [catalog, setCatalog] = useState([]);
@@ -120,21 +126,22 @@ function ReviewCard({ p, assessment, doctor, onChanged }) {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api("GET", `/exercises?conditions=${encodeURIComponent(p.conditions.join(","))}`)
+    const params = new URLSearchParams({ conditions: p.conditions.join(","), patient_id: patientId });
+    api("GET", `/exercises?${params}`)
       .then(setCatalog)
       .catch((e) => setError(e.message));
-  }, [p.conditions]);
+  }, [p.conditions, patientId]);
 
-  // Small warnings from the safety grid, refreshed as the doctor edits. They never block.
+  // Small warnings from the safety grid and the patient's BP reading, refreshed as the doctor edits. They never block.
   useEffect(() => {
     const valid = exercises.filter((e) => e.sets >= 1 && e.amount > 0);
     const t = setTimeout(() => {
-      api("POST", "/plans/check", { conditions: p.conditions, exercises: valid.map(payload) })
+      api("POST", "/plans/check", { conditions: p.conditions, exercises: valid.map(payload), patient_id: patientId })
         .then((out) => setWarnings(out.warnings))
         .catch(() => {});
     }, 300);
     return () => clearTimeout(t);
-  }, [exercises, p.conditions]);
+  }, [exercises, p.conditions, patientId]);
 
   const update = (i, field, value) => setExercises((xs) => xs.map((x, j) => (j === i ? { ...x, [field]: value } : x)));
   const remove = (i) => setExercises((xs) => xs.filter((_, j) => j !== i));

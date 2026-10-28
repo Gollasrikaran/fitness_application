@@ -110,14 +110,15 @@ def build_draft(db: Session, patient_id: str, assessment: dict, patient: dict,
 
     if assessment["severity"] == "severe":
         return doctor(assessment["severe_reasons"])
-    allowed, profile_rules = plan_store.candidates(db, codes, patient.get("age"), patient.get("bmi"))
+    bp = (assessment.get("readings") or {}).get("bp")
+    allowed, profile_rules = plan_store.candidates(db, codes, patient.get("age"), patient.get("bmi"), bp)
     if not allowed:
-        return doctor([f"No exercise is allowed for every condition: {label}"])
+        return doctor([f"No exercise is allowed for this patient: {label}", *profile_rules])
 
     try:
         answer = ask_ai(assessment, patient, allowed)
         exercises, whys, problems = _from_ai(answer, allowed)
-        problems += plan_store.violations(db, exercises, codes) if not problems else []
+        problems += plan_store.violations(db, exercises, codes, bp) if not problems else []
     except Exception as exc:  # the rules draft the plan instead
         log.error("Draft AI call failed for patient %s: %s", patient_id, exc)
         answer, problems = None, [f"the AI was unavailable ({type(exc).__name__})"]
@@ -127,8 +128,8 @@ def build_draft(db: Session, patient_id: str, assessment: dict, patient: dict,
         return save("ai", exercises, answer.instructions.strip(), reason)
 
     log.warning("AI draft not used for patient %s: %s", patient_id, "; ".join(problems))
-    exercises, profile_rules = plan_store.starter_exercises(db, codes, patient.get("age"), patient.get("bmi"))
-    broken = plan_store.violations(db, exercises, codes)
+    exercises, profile_rules = plan_store.starter_exercises(db, codes, patient.get("age"), patient.get("bmi"), bp=bp)
+    broken = plan_store.violations(db, exercises, codes, bp)
     if broken or not exercises:  # can't happen with a consistent grid; never save a broken draft
         log.error("Rule draft broke the rules for patient %s: %s", patient_id, "; ".join(broken))
         return doctor([f"The rules could not build a safe draft: {'; '.join(broken) or 'no exercises'}"])

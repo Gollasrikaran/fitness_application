@@ -5,7 +5,8 @@ Merge rules (BUILD_PLAN.md, "How the reference data merges"):
 - A condition, exercise or rule found in either source is kept.
 - Where both have a rule or a condition bucket, the stricter one wins
   (avoid > modify > safe, refer > supported). Every disagreement is logged.
-- Doses come from our CSV; instructions and images from the reference DB.
+- Doses come from our CSV; instructions and images from the reference DB,
+  or our CSV's instructions for exercises the reference DB has no steps for.
 """
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ from sqlalchemy import text
 
 from store import reference
 from store.db import SCHEMA, Base, engine, session
-from store.models import Condition, ConditionAlias, Exercise, SafetyRule, WarningComplaint
+from store.models import Condition, ConditionAlias, Exercise, ReadingRule, SafetyRule, WarningComplaint
 
 log = logging.getLogger("store.seed")
 
@@ -45,6 +46,7 @@ def _float(value, default=None):
 ADDED_COLUMNS = (
     f'ALTER TABLE "{SCHEMA}".plan_proposals ADD COLUMN IF NOT EXISTS assessment_id VARCHAR(36) '
     f'REFERENCES "{SCHEMA}".assessments (id)',
+    f'ALTER TABLE "{SCHEMA}".assessments ADD COLUMN IF NOT EXISTS readings JSON',
 )
 
 
@@ -52,7 +54,7 @@ def init_store() -> None:
     with engine.begin() as conn:
         conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
     # Reference tables are rebuilt from their sources, so their columns follow the models.
-    for model in (SafetyRule, ConditionAlias, WarningComplaint, Exercise, Condition):
+    for model in (SafetyRule, ReadingRule, ConditionAlias, WarningComplaint, Exercise, Condition):
         model.__table__.drop(engine, checkfirst=True)
     Base.metadata.create_all(engine)
     with engine.begin() as conn:
@@ -72,6 +74,30 @@ def init_store() -> None:
         db.add_all(ConditionAlias(**a) for a in aliases)
         db.add_all(WarningComplaint(phrase=r["phrase"].strip().lower(), label=r["label"])
                    for r in _rows("warning_complaints.csv"))
+        db.add_all(ReadingRule(**r) for r in reading_rules())
+
+
+# Allowed values of the exercise properties the reading rules select on.
+EXERCISE_PROPERTIES = {
+    "exercise_type": {"aerobic", "strength", "isometric", "mobility", "stretch", "breathing"},
+    "intensity": {"light", "moderate", "vigorous"},
+    "position": {"standing", "chair", "floor"},
+    "impact": {"low", "high"},
+}
+
+
+def reading_rules() -> list[dict]:
+    """data/reading_rules.csv, minus rows that select on an unknown property."""
+    out = []
+    for r in _rows("reading_rules.csv"):
+        if r["field"] not in EXERCISE_PROPERTIES or r["action"] not in ("block", "allow_only"):
+            log.warning("Reading rule %r dropped: unknown field or action", r)
+            continue
+        out.append({"metric": r["metric"], "band": r["band"], "sys_from": float(r["sys_from"]),
+                    "dia_from": float(r["dia_from"]), "action": r["action"], "field": r["field"],
+                    "values": [v.strip() for v in r["values"].split("|") if v.strip()], "note": r["note"]})
+    log.info("Reading rules loaded: %d", len(out))
+    return out
 
 
 # Not condition codes: the safety rules decide controlled or not (agent/conditions.py).
@@ -102,8 +128,15 @@ def _from_csv() -> tuple[dict, dict, dict]:
         "max_sets": _int(r["max_sets"], 1), "max_amount": _float(r["max_amount"], 1),
         "per_side": r["per_side"].strip().lower() == "true", "rest_seconds": _int(r["rest_seconds"]),
         "progression_step": _float(r["progression_step"], 1), "priority_order": _int(r["priority_order"], 0),
-        "instructions": [], "images": []}
+        # Steps separated by "|"; used when the reference DB has none for this exercise.
+        "instructions": [s.strip() for s in (r.get("instructions") or "").split("|") if s.strip()], "images": [],
+        **{k: (r.get(k) or "").strip() for k in EXERCISE_PROPERTIES},
+        "breath_hold": (r.get("breath_hold") or "").strip().lower() == "true"}
         for r in _rows("activity_taxonomy.csv")}
+    for e in exercises.values():
+        for k, allowed in EXERCISE_PROPERTIES.items():
+            if e[k] not in allowed:
+                log.warning("Exercise %s: %s %r is not one of %s", e["activity_type"], k, e[k], sorted(allowed))
     rules = {(r["condition_code"], r["activity_type"]): {
         "condition_code": r["condition_code"], "activity_type": r["activity_type"], "verdict": r["verdict"],
         "note": r["note"], "usefulness_rank": _int(r["usefulness_rank"])}
@@ -144,7 +177,7 @@ def _merged() -> tuple[dict, dict, dict]:
                 if r[field] is not None and r[field] != e[field]:
                     disagreements.append(f"exercise {e['activity_type']} {field}: csv {e[field]} (kept), "
                                          f"reference {r[field]}")
-            e.update(media)
+            e.update({k: v for k, v in media.items() if v})  # the reference DB's steps and images win when it has them
 
         for r in ref["rules"]:
             key = (r["condition_code"], r["activity_type"])

@@ -2,7 +2,7 @@
 
 A place to build and try the agent on real clinic data, without touching the
 live website. No login: toggle **Patient** or **Doctor** and pick from the
-dropdowns. The plan for what we are building is in `BUILD_PLAN.md`, open bugs and decisions in `KNOWN_ISSUES.md`, and patients to test by hand in `MANUAL_TESTING.md`; where every
+dropdowns. The plan for what we are building is in `BUILD_PLAN.md`, open bugs and decisions in `KNOWN_ISSUES.md`, patients to test by hand in `MANUAL_TESTING.md`, the next phase (the right exercises per patient) in `EXERCISE_FIT_PLAN.md`, and the clinic data we read in `CLINIC_DATA_WE_USE.md`; where every
 piece of data comes from (clinic DB, reference DB, CSVs, aliases, what the AI
 sees) is in `DATA_FLOW.md`.
 
@@ -118,7 +118,7 @@ cd agent_testbedackend
 | `GET /patients/{id}/agent` | Approved plan, pending draft with its assessment, open case (Doctor tab) |
 | `GET /review-queue?doctor_id=` | Drafts this doctor generated that are waiting for review, oldest first |
 | `GET /review-summary?doctor_id=` | How doctors handled the drafts: approved as drafted, edited or rejected, and what they changed |
-| `GET /exercises?conditions=` | The 12 exercises for the doctor's picker, with the grid's verdict for those conditions |
+| `GET /exercises?conditions=` | All exercises (17) for the doctor's picker, with the grid's verdict for those conditions |
 | `POST /plans/check` | `{conditions, exercises}` → small warnings per exercise (never blocks) |
 | `POST /chat` | `{patient_id, doctor_id, message}` → `{reply, conditions}` |
 | `GET /chat/history?patient_id=&doctor_id=` | The saved conversation, oldest first |

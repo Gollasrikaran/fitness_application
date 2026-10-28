@@ -38,7 +38,7 @@ class Exercise(Base):
     __tablename__ = "exercises"
     activity_type: Mapped[str] = mapped_column(String(64), primary_key=True)
     display_name: Mapped[str] = mapped_column(String(128))
-    prescription_type: Mapped[str] = mapped_column(String(16), default="reps")  # reps | hold | distance
+    prescription_type: Mapped[str] = mapped_column(String(16), default="reps")  # reps | hold | distance | time
     amount_unit: Mapped[str] = mapped_column(String(16))
     default_sets: Mapped[int] = mapped_column(Integer, default=1)
     default_amount: Mapped[float] = mapped_column(Float, default=1)
@@ -48,8 +48,14 @@ class Exercise(Base):
     rest_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     progression_step: Mapped[float] = mapped_column(Float, default=1)
     priority_order: Mapped[int] = mapped_column(Integer, default=0)
+    # Properties the reading rules (ReadingRule) select on
+    exercise_type: Mapped[str] = mapped_column(String(16), default="")  # aerobic | strength | isometric | mobility | stretch | breathing
+    intensity: Mapped[str] = mapped_column(String(16), default="")  # light | moderate | vigorous
+    breath_hold: Mapped[bool] = mapped_column(Boolean, default=False)  # people tend to hold their breath (straining or holding)
+    position: Mapped[str] = mapped_column(String(16), default="")  # standing | chair | floor
+    impact: Mapped[str] = mapped_column(String(8), default="")  # low | high
     # For the patient's plan page, from the reference DB
-    instructions: Mapped[list] = mapped_column(JSON, default=list)  # steps, in order
+    instructions: Mapped[list] = mapped_column(JSON, default=list)  # steps, in order (reference DB, else our CSV)
     images: Mapped[list] = mapped_column(JSON, default=list)  # demo image URLs
 
 
@@ -62,6 +68,27 @@ class SafetyRule(Base):
     verdict: Mapped[str] = mapped_column(String(8))  # safe | modify | avoid
     note: Mapped[str] = mapped_column(Text, default="")
     usefulness_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class ReadingRule(Base):
+    """What a patient's latest reading rules out (data/reading_rules.csv).
+    A rule applies when the reading reaches either threshold (systolic >=
+    sys_from or diastolic >= dia_from); rules add up, so a higher band also
+    gets the lower bands' rules.
+
+    action: block (leave out exercises whose `field` is one of `values`) |
+            allow_only (leave out every exercise whose `field` isn't one of
+            `values`; no values leaves out everything)."""
+    __tablename__ = "reading_rules"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    metric: Mapped[str] = mapped_column(String(16))  # bp
+    band: Mapped[str] = mapped_column(String(32))
+    sys_from: Mapped[float] = mapped_column(Float)
+    dia_from: Mapped[float] = mapped_column(Float)
+    action: Mapped[str] = mapped_column(String(16))
+    field: Mapped[str] = mapped_column(String(32))  # an Exercise property, e.g. exercise_type, intensity
+    values: Mapped[list] = mapped_column(JSON, default=list)
+    note: Mapped[str] = mapped_column(Text, default="")  # "{reading}" is filled in, e.g. "150/95 on 2026-10-12"
 
 
 class ConditionAlias(Base):
@@ -110,6 +137,7 @@ class Assessment(Base):
     ai_status: Mapped[str] = mapped_column(String(16))  # ok | failed
     ai_output: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # the AI's raw answer, for audit
     dropped: Mapped[list] = mapped_column(JSON, default=list)  # AI findings rejected by the checks, and why
+    readings: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # latest readings used for the plan, e.g. {"bp": {sys, dia, date}}
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 

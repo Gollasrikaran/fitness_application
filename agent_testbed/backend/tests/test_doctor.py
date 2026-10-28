@@ -67,8 +67,10 @@ def test_warnings_for_avoid_unreviewed_and_over_max(db):
 def test_catalog_marks_verdicts_for_the_patient(db):
     code, kind = an_avoid(db)
     by_type = {e["activity_type"]: e for e in plans.exercise_catalog(db, [code])}
-    assert len(by_type) == 12 and by_type[kind]["verdict"] == "avoid"
-    assert all(e["verdict"] == "unreviewed" for e in plans.exercise_catalog(db, ["high_bp"]))
+    assert len(by_type) == len(db.scalars(select(Exercise)).all()) and by_type[kind]["verdict"] == "avoid"
+    # No grid rules for a refer condition; with BP and no reading, holds are also "not advised" (treated as 140/90).
+    high_bp = {e["activity_type"]: e["verdict"] for e in plans.exercise_catalog(db, ["high_bp"])}
+    assert set(high_bp.values()) == {"unreviewed", "not advised"} and high_bp["wall_sit"] == "not advised"
 
 
 def test_queue_holds_this_doctors_pending_drafts_oldest_first(db):

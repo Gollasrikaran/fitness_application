@@ -18,7 +18,8 @@ def assessment_dict(a: Assessment | None, full: bool = False) -> dict | None:
     out = {"id": a.id, "codes": a.codes, "conditions": a.conditions, "severity": a.severity,
            "severe_reasons": a.severe_reasons, "problem": a.problem, "body_area": a.body_area,
            "concerns": a.concerns, "missing": a.missing, "unmapped": a.unmapped, "warnings": a.warnings,
-           "ai_status": a.ai_status, "assessed_on": a.created_at.isoformat(timespec="minutes")}
+           "ai_status": a.ai_status, "readings": a.readings or {},
+           "assessed_on": a.created_at.isoformat(timespec="minutes")}
     if full:
         out |= {"doctor_id": a.doctor_id, "ai_output": a.ai_output, "dropped": a.dropped, "model": a.model}
     return out

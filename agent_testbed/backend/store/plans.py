@@ -14,19 +14,23 @@ becomes a Plan, which is what the patient sees and follows.
   checked before it is saved, and one that breaks them is never saved.
 - Doctor edits are different: the doctor has the final say. The grid never
   blocks them; doctor_warnings() shows a small warning instead.
+- reading_limits(): what the patient's latest BP reading rules out
+  (data/reading_rules.csv, by exercise property). Applied like the grid: AI
+  and rules drafts never hold a ruled-out exercise; the doctor gets a warning.
 
 Plans never get harder on their own. A "refer" condition allows no exercise:
 the doctor writes the plan.
 """
 from __future__ import annotations
 
+import re
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from store.models import Assessment, Condition, Exercise, Plan, PlanProposal, SafetyRule
+from store.models import Assessment, Condition, Exercise, Plan, PlanProposal, ReadingRule, SafetyRule
 
 EXERCISES_BY_EXPERIENCE = {"beginner": 4, "intermediate": 5, "active": 7}
 # The clinic record doesn't say how active someone is: start everyone as a
@@ -38,6 +42,12 @@ OLDER_AGE = 60         # at or above: high-impact exercises left out, doses one 
 HIGH_BMI = 30.0        # at or above: high-impact exercises left out
 HIGH_IMPACT = {"running"}
 MAX_EXERCISES = 5      # in any draft the agent makes
+
+# Which BP reading counts (decided 2026-10-28): the latest, if within this
+# many days. A patient with BP and no recent reading is treated as 140/90.
+BP_READING_DAYS = 90
+BP_CODES = {"bp_controlled", "high_bp", "bp_any"}
+ASSUMED_BP = {"sys": 140.0, "dia": 90.0, "date": None, "assumed": True}
 
 
 # ── Reading ─────────────────────────────────────────────────────────────────
@@ -66,14 +76,16 @@ def _num(value) -> str:
 
 def dose_text(sets: int, amount: float, unit: str, kind: str | None, per_side: bool) -> str:
     """The dose in plain words for the patient, e.g. "2 sets × 5 repetitions,
-    each side", "2 sets × hold 10 seconds", "1 km"."""
+    each side", "2 sets × hold 10 seconds", "1 km", "5 minutes"."""
     if kind == "reps" or unit == "count":
         each = f"{_num(amount)} repetitions"
     elif kind == "hold" or unit == "sec":
         each = f"hold {_num(amount)} seconds"
+    elif unit == "min":
+        each = f"{_num(amount)} minutes"
     else:
         each = f"{_num(amount)} {unit}"
-    text = each if kind == "distance" and sets == 1 else f"{sets} sets × {each}"
+    text = each if kind in ("distance", "time") and sets == 1 else f"{sets} sets × {each}"
     return text + (", each side" if per_side else "")
 
 
@@ -145,14 +157,21 @@ def _usefulness(db: Session, codes: list[str]) -> dict[str, int]:
 
 
 def candidates(db: Session, codes: list[str], age: int | None,
-               bmi: float | None) -> tuple[list[dict], list[str]]:
+               bmi: float | None, bp: dict | None = None) -> tuple[list[dict], list[str]]:
     """Every exercise allowed for this patient, most suitable first, at its
     starting dose; and a line per provisional profile rule that changed them.
     Entries: {activity_type, name, unit, sets, amount, notes, verdict}."""
     approved = approved_exercises(db, codes)
+    blocked, bp_lines = reading_limits(db, codes, bp)
+    names = {e["activity_type"]: e["display_name"] for e in approved}
+    rules: list[str] = []
+    for why in bp_lines:  # say what each BP rule took out of this patient's list
+        out_now = [names[k] for k, w in blocked.items() if w == why and k in names]
+        if out_now:
+            rules.append(f"{why} Left out: {', '.join(out_now)}.")
+    approved = [e for e in approved if e["activity_type"] not in blocked]
     ranks = _usefulness(db, codes)
     by_type = {e.activity_type: e for e in db.scalars(select(Exercise))}
-    rules: list[str] = []
     older = age is not None and age >= OLDER_AGE
     if older or (bmi is not None and bmi >= HIGH_BMI):
         dropped = [e["display_name"] for e in approved if e["activity_type"] in HIGH_IMPACT]
@@ -182,19 +201,21 @@ def plan_entry(e: dict) -> dict:
 
 
 def starter_exercises(db: Session, codes: list[str], age: int | None, bmi: float | None,
-                      experience: str = DEFAULT_EXPERIENCE) -> tuple[list[dict], list[str]]:
+                      experience: str = DEFAULT_EXPERIENCE, bp: dict | None = None) -> tuple[list[dict], list[str]]:
     """The rule-built plan (no AI), and a line per provisional profile rule
     that changed it."""
-    allowed, rules = candidates(db, codes, age, bmi)
+    allowed, rules = candidates(db, codes, age, bmi, bp)
     count = EXERCISES_BY_EXPERIENCE.get(experience, EXERCISES_BY_EXPERIENCE["beginner"])
     return [plan_entry(e) for e in allowed[:count]], rules
 
 
-def violations(db: Session, exercises: list[dict], codes: list[str]) -> list[str]:
+def violations(db: Session, exercises: list[dict], codes: list[str], bp: dict | None = None) -> list[str]:
     """Why a draft breaks the safety rules; empty when it doesn't. Fails
     closed: an unknown exercise or condition, a missing rule, "avoid" for any
-    condition, a "refer" condition, or a dose outside 1..max is a violation."""
+    condition, a "refer" condition, a dose outside 1..max, or an exercise
+    the patient's BP reading rules out is a violation."""
     problems = []
+    blocked, _ = reading_limits(db, codes, bp)
     conditions = {c.code: c for c in db.scalars(select(Condition).where(Condition.code.in_(codes)))}
     if not codes or set(codes) - set(conditions):
         problems.append(f"unknown condition codes: {sorted(set(codes) - set(conditions)) or 'none given'}")
@@ -217,6 +238,8 @@ def violations(db: Session, exercises: list[dict], codes: list[str]) -> list[str
         if kind in seen:
             problems.append(f"{ex.display_name}: listed twice")
         seen.add(kind)
+        if kind in blocked:
+            problems.append(f"{ex.display_name}: {blocked[kind]}")
         for code in codes:
             verdict = verdicts[kind].get(code)
             if verdict in (None, "avoid"):
@@ -240,6 +263,53 @@ def pending_superseded(db: Session, patient_id: str) -> None:
         pending.status = "superseded"
 
 
+# ── Rules by reading (BP) ───────────────────────────────────────────────────
+
+def _reading(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def latest_bp(vitals: list[dict], today: date) -> dict | None:
+    """The newest BP reading in the visits (newest first), if taken in the
+    last BP_READING_DAYS days: {"sys", "dia", "date"}."""
+    for v in vitals:
+        sys_, dia = _reading(v.get("bp_sys")), _reading(v.get("bp_dia"))
+        if sys_ is None or dia is None:
+            m = re.match(r"\s*(\d{2,3})\s*/\s*(\d{2,3})", str(v.get("bp") or ""))
+            sys_, dia = (float(m[1]), float(m[2])) if m else (None, None)
+        if sys_ and dia and v.get("date"):
+            day = date.fromisoformat(str(v["date"])[:10])
+            return {"sys": sys_, "dia": dia, "date": day.isoformat()} if (today - day).days <= BP_READING_DAYS else None
+    return None
+
+
+def reading_limits(db: Session, codes: list[str], bp: dict | None) -> tuple[dict[str, str], list[str]]:
+    """What the patient's BP rules out: ({activity_type: why}, a line per rule
+    that applies). Rules add up (a higher band also gets the lower bands').
+    No recent reading: nothing, unless the patient has BP, then 140/90."""
+    if bp is None:
+        if not set(codes) & BP_CODES:
+            return {}, []
+        bp = ASSUMED_BP
+    reading = (f"{bp['sys']:g}/{bp['dia']:g} (no reading in the last {BP_READING_DAYS} days, so treated as this)"
+               if bp.get("assumed") else f"{bp['sys']:g}/{bp['dia']:g} on {bp['date']}")
+    exercises = list(db.scalars(select(Exercise)))
+    blocked: dict[str, str] = {}
+    lines = []
+    for r in db.scalars(select(ReadingRule).where(ReadingRule.metric == "bp").order_by(ReadingRule.id)):
+        if bp["sys"] < r.sys_from and bp["dia"] < r.dia_from:
+            continue
+        why = r.note.format(reading=reading)
+        lines.append(why)
+        for e in exercises:
+            if (getattr(e, r.field) in r.values) == (r.action == "block"):
+                blocked.setdefault(e.activity_type, why)
+    return blocked, lines
+
+
 # ── Doctor edits: the doctor has the final say ──────────────────────────────
 
 def _verdicts(db: Session, codes: list[str]) -> dict[str, dict[str, SafetyRule]]:
@@ -249,11 +319,13 @@ def _verdicts(db: Session, codes: list[str]) -> dict[str, dict[str, SafetyRule]]
     return rules
 
 
-def exercise_catalog(db: Session, codes: list[str]) -> list[dict]:
+def exercise_catalog(db: Session, codes: list[str], bp: dict | None = None) -> list[dict]:
     """Every exercise, for the doctor's picker, with what the grid says for
     this patient: the strictest across the conditions ("avoid", "unreviewed"
-    when a condition has no rule for it, "modify", "safe")."""
+    when a condition has no rule for it, "modify", "safe"), or "not advised"
+    when the patient's BP reading rules it out."""
     rules = _verdicts(db, codes)
+    blocked, _ = reading_limits(db, codes, bp)
     out = []
     for ex in db.scalars(select(Exercise).order_by(Exercise.priority_order)):
         by_condition = rules.get(ex.activity_type, {})
@@ -261,6 +333,8 @@ def exercise_catalog(db: Session, codes: list[str]) -> list[dict]:
         verdict = ("avoid" if "avoid" in verdicts else "unreviewed" if not codes or set(codes) - set(by_condition)
                    else "modify" if "modify" in verdicts else "safe")
         notes = dict.fromkeys(r.note for r in by_condition.values() if r.verdict != "safe" and r.note)
+        if ex.activity_type in blocked and verdict != "avoid":
+            verdict, notes = "not advised", {blocked[ex.activity_type]: None, **notes}
         out.append({"activity_type": ex.activity_type, "name": ex.display_name, "unit": ex.amount_unit,
                     "default_sets": ex.default_sets, "default_amount": ex.default_amount, "max_sets": ex.max_sets,
                     "max_amount": ex.max_amount, "per_side": ex.per_side, "verdict": verdict,
@@ -291,11 +365,13 @@ def doctor_exercises(db: Session, items: list[dict]) -> list[dict]:
     return out
 
 
-def doctor_warnings(db: Session, exercises: list[dict], codes: list[str]) -> dict[str, list[str]]:
+def doctor_warnings(db: Session, exercises: list[dict], codes: list[str],
+                    bp: dict | None = None) -> dict[str, list[str]]:
     """Small warnings for the doctor, per exercise: marked avoid or not
-    reviewed for one of the patient's conditions, or a dose above the usual
-    maximum. Never blocks."""
+    reviewed for one of the patient's conditions, ruled out by the patient's
+    BP reading, or a dose above the usual maximum. Never blocks."""
     names = condition_names(db, codes)
+    blocked, _ = reading_limits(db, codes, bp)
     rules = _verdicts(db, codes)
     by_type = {e.activity_type: e for e in db.scalars(select(Exercise))}
     out = {}
@@ -310,6 +386,8 @@ def doctor_warnings(db: Session, exercises: list[dict], codes: list[str]) -> dic
                 warn.append(f"Not reviewed for {names.get(code, code)}")
             elif rule.verdict == "avoid":
                 warn.append(f"Marked avoid for {names.get(code, code)}" + (f": {rule.note}" if rule.note else ""))
+        if ex.activity_type in blocked:
+            warn.append(f"Not advised: {blocked[ex.activity_type]}")
         sets, amount = x.get("sets"), x.get("amount")
         if isinstance(sets, (int, float)) and sets > ex.max_sets:
             warn.append(f"{sets} sets is above the usual maximum of {ex.max_sets}")

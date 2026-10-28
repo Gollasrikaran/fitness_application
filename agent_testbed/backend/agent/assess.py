@@ -30,6 +30,7 @@ from agent.prompts import ASSESS
 from agent.routing import finalize
 from app import clinic
 from store import assessments as assessment_store
+from store import plans as plan_store
 from store.db import session
 from store.models import Assessment
 
@@ -135,7 +136,8 @@ def run_assessment(patient_id: str, doctor_id: str, today: date | None = None,
             problem=(ai or {}).get("problem", ""), body_area=(ai or {}).get("body_area", ""),
             concerns=[*(ai or {}).get("concerns", []), *unlisted], missing=(ai or {}).get("missing", []),
             unmapped=rules.unmapped, warnings=rules.warnings, ai_status="ok" if ai else "failed",
-            ai_output=ai, dropped=dropped, model=MODEL)
+            ai_output=ai, dropped=dropped, model=MODEL,
+            readings={"bp": plan_store.latest_bp(context["vitals_recent"], today)})
         db.add(saved)
         db.flush()
         return assessment_store.assessment_dict(saved, full=True)

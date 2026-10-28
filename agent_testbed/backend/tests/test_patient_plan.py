@@ -83,3 +83,8 @@ def test_an_exercise_since_removed_from_the_table_still_shows(db):
     db.flush()
     e = plans.patient_plan(db, plan, None)["exercises"][0]
     assert e["name"] == "Glute Bridge" and e["dose"] == "2 sets × 5 repetitions" and e["steps"] == []
+
+
+def test_time_exercises_in_plain_words(db):
+    out = plans.patient_plan(db, approved(db, "p1", [item("slow_breathing", 1, 5), item("march_in_place", 2, 10)]), None)
+    assert [e["dose"] for e in out["exercises"]] == ["5 minutes", "2 sets × 10 minutes"]
