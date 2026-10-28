@@ -1,0 +1,134 @@
+source,phrase,code,note
+long_term_condition,Hypertension,bp_any,controlled or not is decided from recent BP flags
+long_term_condition,Diabetes Mellitus,diabetes_any,controlled or not is decided from recent sugar flags
+long_term_condition,Heart Failure,heart_condition,
+long_term_condition,Coronary Artery Disease,heart_condition,
+long_term_condition,Stroke / CVA,neurological,
+long_term_condition,Epilepsy,neurological,
+long_term_condition,Depression,depression,
+long_term_condition,Anxiety Disorder,anxiety,
+long_term_condition,Hypothyroidism,other_unlisted,no exercise rules of ours: doctor decides
+long_term_condition,Hyperthyroidism,other_unlisted,no exercise rules of ours: doctor decides
+long_term_condition,Asthma,other_unlisted,no exercise rules of ours: doctor decides
+long_term_condition,COPD,other_unlisted,no exercise rules of ours: doctor decides
+long_term_condition,Chronic Anaemia,other_unlisted,no exercise rules of ours: doctor decides
+long_term_condition,Osteoarthritis,other_unlisted,joint not recorded: doctor decides
+long_term_condition,Rheumatoid Arthritis,other_unlisted,no exercise rules of ours: doctor decides
+long_term_condition,Chronic Kidney Disease,other_unlisted,serious illness: doctor decides
+long_term_condition,Cancer,other_unlisted,serious illness: doctor decides
+long_term_condition,HIV/AIDS,other_unlisted,serious illness: doctor decides
+long_term_condition,Tuberculosis,other_unlisted,serious illness: doctor decides
+long_term_condition,Chronic Hepatitis,other_unlisted,serious illness: doctor decides
+long_term_condition,Schizophrenia,other_unlisted,serious illness: doctor decides
+health_history,hypertension,bp_any,
+health_history,diabetes,diabetes_any,
+health_history,heart_disease,heart_condition,
+health_history,high_cholesterol,high_cholesterol,
+health_history,thyroid,other_unlisted,no exercise rules of ours: doctor decides
+health_history,asthma,other_unlisted,no exercise rules of ours: doctor decides
+health_history,tuberculosis,other_unlisted,serious illness: doctor decides
+text,htn,bp_any,
+text,hypertension,bp_any,
+text,high bp,bp_any,
+text,bp problem,bp_any,
+text,htn urgency,high_bp,
+text,uncontrolled htn,high_bp,
+text,uncontrolled bp,high_bp,
+text,t2dm,diabetes_any,
+text,dm,diabetes_any,
+text,diabetes,diabetes_any,
+text,diabetic,diabetes_any,
+text,sugar problem,diabetes_any,
+text,uncontrolled dm,diabetes,
+text,uncontrolled diabetes,diabetes,
+text,prediabetes,prediabetes,
+text,pre diabetes,prediabetes,
+text,cad,heart_condition,
+text,ihd,heart_condition,
+text,heart failure,heart_condition,
+text,angina,heart_condition,
+text,mi,heart_condition,
+text,cva,neurological,
+text,stroke,neurological,
+text,epilepsy,neurological,
+text,seizure,neurological,
+text,neuropathy,neurological,
+text,radiculopathy,neurological,nerve root involvement: doctor decides
+text,lumbar rad,neurological,nerve root involvement: doctor decides
+text,cervical rad,neurological,nerve root involvement: doctor decides
+text,sciatica,neurological,nerve root involvement: doctor decides
+text,myelopathy,neurological,spinal cord involvement
+text,knee pain,arthritis_knee,
+text,knee joint pain,arthritis_knee,
+text,oa knee,arthritis_knee,
+text,knee oa,arthritis_knee,
+text,knee osteoarthritis,arthritis_knee,
+text,knee arthritis,arthritis_knee,
+text,knee arthitis,arthritis_knee,common misspelling in the records
+text,djd knee,arthritis_knee,
+text,low back ache,chronic_back_pain,
+text,low back pain,chronic_back_pain,
+text,lower back pain,chronic_back_pain,
+text,lbp,chronic_back_pain,
+text,backache,chronic_back_pain,
+text,back ache,chronic_back_pain,
+text,back pain,chronic_back_pain,
+text,waist pain,chronic_back_pain,common way patients describe low back pain
+text,lumbar spondylosis,spondylosis,
+text,cervical spondylosis,spondylosis,
+text,cervical spondylitis,spondylosis,
+text,spondylosis,spondylosis,
+text,cervical pain,spondylosis,
+text,neck pain,spondylosis,
+text,djd spine,spondylosis,
+text,pivd,herniated_disk,
+text,disc prolapse,herniated_disk,
+text,slip disc,herniated_disk,
+text,herniated disc,herniated_disk,
+text,degenerative disc,degenerative_disc,
+text,spinal stenosis,spinal_stenosis,
+text,canal stenosis,spinal_stenosis,
+text,hip pain,arthritis_hip,
+text,oa hip,arthritis_hip,
+text,hip oa,arthritis_hip,
+text,bursitis,bursitis,
+text,carpal tunnel,carpal_tunnel,
+text,sprain,sprain_strain,
+text,strain,sprain_strain,
+text,injury,acute_injury,
+text,fracture,acute_injury,
+text,gout,gout,
+text,hyperuricemia,gout,
+text,dyslipidemia,high_cholesterol,
+text,dyslipidaemia,high_cholesterol,
+text,high cholesterol,high_cholesterol,
+text,obesity,obesity,
+text,obese,obesity,
+text,pcos,pcos,
+text,pcod,pcos,
+text,pregnancy,pregnancy,
+text,pregnant,pregnancy,
+text,anc,pregnancy,antenatal care
+text,primi,pregnancy,
+text,post op,recent_surgery,
+text,post operative,recent_surgery,
+text,postoperative,recent_surgery,
+text,depression,depression,
+text,anxiety,anxiety,
+text,hypothyroidism,other_unlisted,no exercise rules of ours: doctor decides
+text,hyperthyroidism,other_unlisted,no exercise rules of ours: doctor decides
+text,asthma,other_unlisted,no exercise rules of ours: doctor decides
+text,copd,other_unlisted,no exercise rules of ours: doctor decides
+text,shoulder pain,other_unlisted,no shoulder exercises yet: doctor decides
+text,frozen shoulder,other_unlisted,no shoulder exercises yet: doctor decides
+text,shoulder impingement,other_unlisted,no shoulder exercises yet: doctor decides
+text,heel pain,other_unlisted,no foot exercises yet: doctor decides
+text,plantar fasciitis,other_unlisted,no foot exercises yet: doctor decides
+text,plantar fascitis,other_unlisted,no foot exercises yet: doctor decides
+text,plantar fasciatis,other_unlisted,no foot exercises yet: doctor decides
+text,ankle pain,other_unlisted,no ankle exercises yet: doctor decides
+text,joint pain,other_unlisted,joint not named: doctor decides
+text,polyarthralgia,other_unlisted,joint not named: doctor decides
+text,arthralgia,other_unlisted,joint not named: doctor decides
+text,rheumatoid,other_unlisted,no exercise rules of ours: doctor decides
+text,vertigo,other_unlisted,dizziness: doctor decides
