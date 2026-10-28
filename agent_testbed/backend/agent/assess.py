@@ -137,7 +137,7 @@ def run_assessment(patient_id: str, doctor_id: str, today: date | None = None,
             concerns=[*(ai or {}).get("concerns", []), *unlisted], missing=(ai or {}).get("missing", []),
             unmapped=rules.unmapped, warnings=rules.warnings, ai_status="ok" if ai else "failed",
             ai_output=ai, dropped=dropped, model=MODEL,
-            readings={"bp": plan_store.latest_bp(context["vitals_recent"], today)})
+            readings=plan_store.latest_readings(context["vitals_recent"], today))
         db.add(saved)
         db.flush()
         return assessment_store.assessment_dict(saved, full=True)

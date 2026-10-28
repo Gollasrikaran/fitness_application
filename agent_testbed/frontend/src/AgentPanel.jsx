@@ -75,6 +75,22 @@ export default function AgentPanel({ patientId, doctor, doctors, version, onChan
   );
 }
 
+// The latest readings the reading rules tested (last 90 days), e.g.
+// "BP 150/95 (2026-10-20) · Sugar 260 mg/dL (2026-10-20) · no Hb, SpO2, pulse".
+const READING = {
+  bp: ["BP", (r) => `${r.sys}/${r.dia}`],
+  sugar: ["Sugar", (r) => `${r.low === r.high ? r.high : `${r.low}–${r.high}`} mg/dL`],
+  hb: ["Hb", (r) => `${r.value} g/dL`],
+  spo2: ["SpO2", (r) => `${r.value}%`],
+  pulse: ["Pulse", (r) => `${r.value}/min`],
+};
+function readingsText(readings) {
+  const known = Object.keys(READING).filter((k) => k in readings);
+  const seen = known.filter((k) => readings[k]).map((k) => `${READING[k][0]} ${READING[k][1](readings[k])} (${readings[k].date})`);
+  const none = known.filter((k) => !readings[k]).map((k) => READING[k][0]);
+  return [...seen, none.length && `none in the last 90 days for ${none.join(", ")}`].filter(Boolean).join(" · ");
+}
+
 function AssessmentView({ a }) {
   return (
     <div className="assessment">
@@ -83,11 +99,8 @@ function AssessmentView({ a }) {
         <span className={`badge sev-${a.severity}`}>{a.severity}</span>
       </div>
       {a.problem && <p className="small">{a.problem}{a.body_area && <span className="muted"> · {a.body_area}</span>}</p>}
-      {a.readings && "bp" in a.readings && (
-        <p className="small muted">
-          BP used for the plan:{" "}
-          {a.readings.bp ? `${a.readings.bp.sys}/${a.readings.bp.dia} on ${a.readings.bp.date}` : "no reading in the last 90 days"}
-        </p>
+      {a.readings && Object.keys(a.readings).length > 0 && (
+        <p className="small muted">Readings used for the plan: {readingsText(a.readings)}</p>
       )}
       {a.severe_reasons.length > 0 && (
         <ul className="small reasons">

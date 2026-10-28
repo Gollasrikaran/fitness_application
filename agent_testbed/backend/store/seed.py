@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import re
 from pathlib import Path
 
 from sqlalchemy import text
@@ -86,15 +87,39 @@ EXERCISE_PROPERTIES = {
 }
 
 
+# The readings the rules can test, and the fields of each (store.plans.latest_readings).
+READING_FIELDS = {"bp": {"sys", "dia"}, "sugar": {"high", "low"}, "hb": {"value"}, "spo2": {"value"},
+                  "pulse": {"value"}}
+_TERM = re.compile(r"^\s*([a-z]+)\s*(>=|<=|>|<)\s*(\d+(?:\.\d+)?)\s*$")
+
+
+def parse_when(when: str, metric: str) -> list[list]:
+    """"sys>=140 or dia>=90" -> [["sys", ">=", 140.0], ["dia", ">=", 90.0]]
+    (any one term applies). ValueError for anything else."""
+    terms = []
+    for part in when.split(" or "):
+        m = _TERM.match(part)
+        if not m or m[1] not in READING_FIELDS.get(metric, ()):
+            raise ValueError(f"bad term {part!r} for {metric}")
+        terms.append([m[1], m[2], float(m[3])])
+    return terms
+
+
 def reading_rules() -> list[dict]:
-    """data/reading_rules.csv, minus rows that select on an unknown property."""
+    """data/reading_rules.csv, minus rows with an unknown reading, property
+    or action, or a condition that can't be read."""
     out = []
     for r in _rows("reading_rules.csv"):
-        if r["field"] not in EXERCISE_PROPERTIES or r["action"] not in ("block", "allow_only"):
-            log.warning("Reading rule %r dropped: unknown field or action", r)
+        try:
+            if r["metric"] not in READING_FIELDS or r["field"] not in EXERCISE_PROPERTIES \
+                    or r["action"] not in ("block", "allow_only"):
+                raise ValueError("unknown metric, field or action")
+            terms = parse_when(r["when"], r["metric"])
+        except ValueError as exc:
+            log.warning("Reading rule %r dropped: %s", r, exc)
             continue
-        out.append({"metric": r["metric"], "band": r["band"], "sys_from": float(r["sys_from"]),
-                    "dia_from": float(r["dia_from"]), "action": r["action"], "field": r["field"],
+        out.append({"metric": r["metric"], "band": r["band"], "when": r["when"], "terms": terms,
+                    "action": r["action"], "field": r["field"],
                     "values": [v.strip() for v in r["values"].split("|") if v.strip()], "note": r["note"]})
     log.info("Reading rules loaded: %d", len(out))
     return out

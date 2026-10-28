@@ -25,7 +25,7 @@ def test_new_exercises_have_a_verdict_for_every_supported_condition(db):
 
 
 def test_bp_patients_get_the_new_exercises_with_the_breathing_note(db):
-    allowed, _ = plans.candidates(db, ["bp_controlled"], age=50, bmi=24, bp=NORMAL_BP)
+    allowed, _ = plans.candidates(db, ["bp_controlled"], age=50, bmi=24, readings={"bp": NORMAL_BP})
     by_type = {c["activity_type"]: c for c in allowed}
     assert set(NEW) <= set(by_type)
     assert by_type["wall_sit"]["verdict"] == "modify" and "hold your breath" in by_type["wall_sit"]["notes"]
@@ -46,13 +46,13 @@ def test_new_exercises_rank_after_the_original_twelve(db):
 
 
 def test_bp_list_puts_the_research_backed_exercises_first(db):
-    allowed, _ = plans.candidates(db, ["bp_controlled"], age=50, bmi=24, bp=NORMAL_BP)
+    allowed, _ = plans.candidates(db, ["bp_controlled"], age=50, bmi=24, readings={"bp": NORMAL_BP})
     assert [c["activity_type"] for c in allowed][:5] == [
         "walk", "march_in_place", "sit_to_stand", "slow_breathing", "wall_pushup"]
 
 
 def test_bp_breath_holding_exercises_carry_the_breathing_note(db):
-    allowed, _ = plans.candidates(db, ["bp_controlled"], age=50, bmi=24, bp=NORMAL_BP)
+    allowed, _ = plans.candidates(db, ["bp_controlled"], age=50, bmi=24, readings={"bp": NORMAL_BP})
     by_type = {c["activity_type"]: c for c in allowed}
     for kind in ("neck_isometric", "glute_bridge", "dead_bug", "wall_sit"):
         assert by_type[kind]["verdict"] == "modify" and "hold your breath" in by_type[kind]["notes"], kind

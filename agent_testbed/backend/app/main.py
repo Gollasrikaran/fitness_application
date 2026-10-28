@@ -157,25 +157,25 @@ def review_summary(doctor_id: str | None = None):
         return plan_store.review_summary(db, doctor_id)
 
 
-def _bp_for(db, patient_id: str | None) -> dict | None:
-    """The BP reading behind the patient's waiting draft (else their latest
+def _readings_for(db, patient_id: str | None) -> dict:
+    """The readings behind the patient's waiting draft (else their latest
     assessment), for the doctor's warnings."""
     if not patient_id:
-        return None
+        return {}
     pending = plan_store.pending_proposal(db, patient_id)
     a = db.get(Assessment, pending.assessment_id) if pending and pending.assessment_id else None
     a = a or assessment_store.latest(db, patient_id)
-    return ((a.readings or {}).get("bp") if a else None)
+    return (a.readings or {}) if a else {}
 
 
 @app.get("/exercises")
 def exercises(conditions: str = "", patient_id: str | None = None):
     """All exercises for the doctor's picker, with what the safety grid says
-    for these conditions (comma-separated codes), and what the patient's BP
-    reading rules out."""
+    for these conditions (comma-separated codes), and what the patient's
+    readings rule out."""
     codes = [c for c in conditions.split(",") if c.strip()]
     with session() as db:
-        return plan_store.exercise_catalog(db, codes, _bp_for(db, patient_id))
+        return plan_store.exercise_catalog(db, codes, _readings_for(db, patient_id))
 
 
 class ExerciseIn(BaseModel):
@@ -188,7 +188,7 @@ class ExerciseIn(BaseModel):
 class CheckIn(BaseModel):
     conditions: list[str]
     exercises: list[ExerciseIn]
-    patient_id: str | None = None  # for the BP reading behind the draft
+    patient_id: str | None = None  # for the readings behind the draft
 
 
 @app.post("/plans/check")
@@ -196,7 +196,7 @@ def check_plan(body: CheckIn):
     """Small warnings for a doctor's edit, per exercise. They never block."""
     with session() as db:
         return {"warnings": plan_store.doctor_warnings(db, [e.model_dump() for e in body.exercises], body.conditions,
-                                                       _bp_for(db, body.patient_id))}
+                                                       _readings_for(db, body.patient_id))}
 
 
 class ReviewIn(BaseModel):

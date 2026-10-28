@@ -72,23 +72,23 @@ class SafetyRule(Base):
 
 class ReadingRule(Base):
     """What a patient's latest reading rules out (data/reading_rules.csv).
-    A rule applies when the reading reaches either threshold (systolic >=
-    sys_from or diastolic >= dia_from); rules add up, so a higher band also
-    gets the lower bands' rules.
+    A rule applies when any of its terms holds for the patient's latest
+    reading of `metric` (e.g. "sys>=140 or dia>=90"); rules add up, so a
+    higher band also gets the lower bands' rules.
 
     action: block (leave out exercises whose `field` is one of `values`) |
             allow_only (leave out every exercise whose `field` isn't one of
             `values`; no values leaves out everything)."""
     __tablename__ = "reading_rules"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    metric: Mapped[str] = mapped_column(String(16))  # bp
+    metric: Mapped[str] = mapped_column(String(16))  # bp | sugar | hb | spo2 | pulse
     band: Mapped[str] = mapped_column(String(32))
-    sys_from: Mapped[float] = mapped_column(Float)
-    dia_from: Mapped[float] = mapped_column(Float)
+    when: Mapped[str] = mapped_column(String(64))  # as written in the CSV, e.g. "sys>=140 or dia>=90"
+    terms: Mapped[list] = mapped_column(JSON, default=list)  # parsed: [[field, op, number], ...], any one applies
     action: Mapped[str] = mapped_column(String(16))
     field: Mapped[str] = mapped_column(String(32))  # an Exercise property, e.g. exercise_type, intensity
     values: Mapped[list] = mapped_column(JSON, default=list)
-    note: Mapped[str] = mapped_column(Text, default="")  # "{reading}" is filled in, e.g. "150/95 on 2026-10-12"
+    note: Mapped[str] = mapped_column(Text, default="")  # "{reading}" is filled in, e.g. "150/95 on 2026-10-12", "310 mg/dL on 2026-10-12"
 
 
 class ConditionAlias(Base):
@@ -137,7 +137,7 @@ class Assessment(Base):
     ai_status: Mapped[str] = mapped_column(String(16))  # ok | failed
     ai_output: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # the AI's raw answer, for audit
     dropped: Mapped[list] = mapped_column(JSON, default=list)  # AI findings rejected by the checks, and why
-    readings: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # latest readings used for the plan, e.g. {"bp": {sys, dia, date}}
+    readings: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # latest readings used for the plan: {"bp": {sys, dia, date}, "sugar": {high, low, date}, "hb"|"spo2"|"pulse": {value, date}}
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
