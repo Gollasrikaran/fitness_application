@@ -1,7 +1,7 @@
 metric,band,when,action,field,values,note
 bp,140-159/90-99,sys>=140 or dia>=90,block,exercise_type,isometric,"Holding exercises raise BP during the hold: left out at BP {reading}."
 bp,140-159/90-99,sys>=140 or dia>=90,block,intensity,vigorous,"Vigorous exercise left out at BP {reading}: moderate effort only."
-bp,160-179/100-109,sys>=160 or dia>=100,allow_only,exercise_type,aerobic|breathing|mobility,"At BP {reading}: walking-type, breathing and gentle mobility only."
+bp,160-179/100-109,sys>=160 or dia>=100,allow_only,exercise_type,aerobic|balance|breathing|mobility,"At BP {reading}: walking-type, balance, breathing and gentle mobility only."
 bp,180/110 or above,sys>=180 or dia>=110,allow_only,exercise_type,,"BP {reading} is 180/110 or above: no exercise plan; a doctor decides."
 sugar,250-299 mg/dL,high>=250,block,intensity,vigorous,"Vigorous exercise left out at sugar {reading}: moderate effort only."
 sugar,300 mg/dL or above,high>=300,allow_only,exercise_type,,"Sugar {reading} is 300 mg/dL or above: no exercise plan; a doctor decides."

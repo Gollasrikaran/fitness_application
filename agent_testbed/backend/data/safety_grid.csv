@@ -48,29 +48,29 @@ spinal_stenosis,ankle_circles,safe,"Gentle, low-load movement with no specific c
 spinal_stenosis,wrist_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-08-14
 spinal_stenosis,running,modify,Running adds repeated impact loading to the spine that walking does not. Start with a run/walk mix and stop if any symptom travels below the knee.,11,product-team (not clinically reviewed),2026-08-14
 spondylosis,walk,safe,"Gentle, low-load movement with no specific concern for this condition.",4,product-team (not clinically reviewed),2026-08-14
-spondylosis,neck_isometric,safe,"Gentle, low-load movement with no specific concern for this condition.",1,product-team (not clinically reviewed),2026-08-14
-spondylosis,shoulder_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",2,product-team (not clinically reviewed),2026-08-14
-spondylosis,lower_back_side_stretch,modify,"Seated and gentle, but it is direct lateral spine flexion. Keep the range small and stop at any symptom change.",6,product-team (not clinically reviewed),2026-08-14
-spondylosis,glute_bridge,safe,"Gentle, low-load movement with no specific concern for this condition.",5,product-team (not clinically reviewed),2026-08-14
-spondylosis,dead_bug,modify,"Commonly used for spinal stability, but requires a neutral spine held throughout. Reduce range if the lower back lifts off the floor.",3,product-team (not clinically reviewed),2026-08-14
-spondylosis,hamstring_stretch,modify,Use a supine (lying) or standing variant rather than the seated floor reach.,11,product-team (not clinically reviewed),2026-08-14
-spondylosis,quad_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",10,product-team (not clinically reviewed),2026-08-14
-spondylosis,calf_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",9,product-team (not clinically reviewed),2026-08-14
-spondylosis,ankle_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",7,product-team (not clinically reviewed),2026-08-14
-spondylosis,wrist_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-08-14
-spondylosis,running,modify,Running adds repeated impact loading to the spine that walking does not. Start with a run/walk mix and stop if any symptom travels below the knee.,12,product-team (not clinically reviewed),2026-08-14
+spondylosis,neck_isometric,safe,"Gentle, low-load movement with no specific concern for this condition.",2,product-team (not clinically reviewed),2026-08-14
+spondylosis,shoulder_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",3,product-team (not clinically reviewed),2026-08-14
+spondylosis,lower_back_side_stretch,modify,"Seated and gentle, but it is direct lateral spine flexion. Keep the range small and stop at any symptom change.",7,product-team (not clinically reviewed),2026-08-14
+spondylosis,glute_bridge,safe,"Gentle, low-load movement with no specific concern for this condition.",6,product-team (not clinically reviewed),2026-08-14
+spondylosis,dead_bug,modify,"Commonly used for spinal stability, but requires a neutral spine held throughout. Reduce range if the lower back lifts off the floor.",5,product-team (not clinically reviewed),2026-08-14
+spondylosis,hamstring_stretch,modify,Use a supine (lying) or standing variant rather than the seated floor reach.,18,product-team (not clinically reviewed),2026-08-14
+spondylosis,quad_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-08-14
+spondylosis,calf_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",17,product-team (not clinically reviewed),2026-08-14
+spondylosis,ankle_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-08-14
+spondylosis,wrist_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-08-14
+spondylosis,running,modify,Running adds repeated impact loading to the spine that walking does not. Start with a run/walk mix and stop if any symptom travels below the knee.,25,product-team (not clinically reviewed),2026-08-14
 arthritis_hip,walk,safe,"Gentle, low-load movement with no specific concern for this condition.",1,product-team (not clinically reviewed),2026-08-14
-arthritis_hip,neck_isometric,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-08-14
-arthritis_hip,shoulder_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",7,product-team (not clinically reviewed),2026-08-14
-arthritis_hip,lower_back_side_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",9,product-team (not clinically reviewed),2026-08-14
-arthritis_hip,glute_bridge,modify,"Loads the hip joint directly. Small range, stop before end-of-range discomfort.",2,product-team (not clinically reviewed),2026-08-14
-arthritis_hip,dead_bug,safe,"Gentle, low-load movement with no specific concern for this condition.",4,product-team (not clinically reviewed),2026-08-14
-arthritis_hip,hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",11,product-team (not clinically reviewed),2026-08-14
-arthritis_hip,quad_stretch,modify,The side-lying position presses the hip forward into extension. Reduce range.,3,product-team (not clinically reviewed),2026-08-14
-arthritis_hip,calf_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",10,product-team (not clinically reviewed),2026-08-14
-arthritis_hip,ankle_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",5,product-team (not clinically reviewed),2026-08-14
-arthritis_hip,wrist_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",6,product-team (not clinically reviewed),2026-08-14
-arthritis_hip,running,modify,"Running loads the hip joint with repeated impact. Prefer walking, or reduce distance and frequency, especially during a flare.",12,product-team (not clinically reviewed),2026-08-14
+arthritis_hip,neck_isometric,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-08-14
+arthritis_hip,shoulder_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-08-14
+arthritis_hip,lower_back_side_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-08-14
+arthritis_hip,glute_bridge,modify,"Loads the hip joint directly. Small range, stop before end-of-range discomfort.",3,product-team (not clinically reviewed),2026-08-14
+arthritis_hip,dead_bug,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-08-14
+arthritis_hip,hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-08-14
+arthritis_hip,quad_stretch,modify,The side-lying position presses the hip forward into extension. Reduce range.,23,product-team (not clinically reviewed),2026-08-14
+arthritis_hip,calf_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",11,product-team (not clinically reviewed),2026-08-14
+arthritis_hip,ankle_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",12,product-team (not clinically reviewed),2026-08-14
+arthritis_hip,wrist_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",17,product-team (not clinically reviewed),2026-08-14
+arthritis_hip,running,modify,"Running loads the hip joint with repeated impact. Prefer walking, or reduce distance and frequency, especially during a flare.",25,product-team (not clinically reviewed),2026-08-14
 bursitis,walk,safe,"Gentle, low-load movement with no specific concern for this condition.",1,product-team (not clinically reviewed),2026-08-14
 bursitis,neck_isometric,safe,"Gentle, low-load movement with no specific concern for this condition.",5,product-team (not clinically reviewed),2026-08-14
 bursitis,shoulder_circles,modify,"If the bursitis is in the shoulder, circling is direct impingement. Small range only.",11,product-team (not clinically reviewed),2026-08-14
@@ -132,17 +132,17 @@ none,quad_stretch,safe,"No condition selected — standard program, no exclusion
 none,calf_stretch,safe,"No condition selected — standard program, no exclusions.",8,product-team (not clinically reviewed),2026-08-28
 none,lower_back_side_stretch,safe,"No condition selected — standard program, no exclusions.",12,product-team (not clinically reviewed),2026-08-28
 prediabetes,walk,safe,"Gentle, low-load movement with no specific concern for this condition.",1,product-team (not clinically reviewed),2026-09-03
-prediabetes,glute_bridge,safe,"Gentle, low-load movement with no specific concern for this condition.",3,product-team (not clinically reviewed),2026-09-03
-prediabetes,dead_bug,safe,"Gentle, low-load movement with no specific concern for this condition.",4,product-team (not clinically reviewed),2026-09-03
-prediabetes,shoulder_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",5,product-team (not clinically reviewed),2026-09-03
-prediabetes,running,safe,"Gentle, low-load movement with no specific concern for this condition.",2,product-team (not clinically reviewed),2026-09-03
-prediabetes,ankle_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",6,product-team (not clinically reviewed),2026-09-03
-prediabetes,wrist_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",7,product-team (not clinically reviewed),2026-09-03
-prediabetes,calf_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-09-03
-prediabetes,hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",9,product-team (not clinically reviewed),2026-09-03
-prediabetes,quad_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",10,product-team (not clinically reviewed),2026-09-03
-prediabetes,neck_isometric,safe,"Gentle, low-load movement with no specific concern for this condition.",11,product-team (not clinically reviewed),2026-09-03
-prediabetes,lower_back_side_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",12,product-team (not clinically reviewed),2026-09-03
+prediabetes,glute_bridge,modify,"Breathe normally throughout; don't hold your breath. Straining with the breath held raises the pressure in the eyes, which matters if diabetes has affected them.",11,product-team (not clinically reviewed),2026-10-29
+prediabetes,dead_bug,modify,"Breathe normally throughout; don't hold your breath. Straining with the breath held raises the pressure in the eyes, which matters if diabetes has affected them.",24,product-team (not clinically reviewed),2026-10-29
+prediabetes,shoulder_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-09-03
+prediabetes,running,modify,"Higher-intensity, high-impact activity: start with walking or a run/walk mix, and favour walking if the feet get sore or numb.",25,product-team (not clinically reviewed),2026-10-29
+prediabetes,ankle_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-09-03
+prediabetes,wrist_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-09-03
+prediabetes,calf_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",14,product-team (not clinically reviewed),2026-09-03
+prediabetes,hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",17,product-team (not clinically reviewed),2026-09-03
+prediabetes,quad_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-09-03
+prediabetes,neck_isometric,modify,"Breathe normally throughout; don't hold your breath. Straining with the breath held raises the pressure in the eyes, which matters if diabetes has affected them.",21,product-team (not clinically reviewed),2026-10-29
+prediabetes,lower_back_side_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-09-03
 high_cholesterol,walk,safe,"Gentle, low-load movement with no specific concern for this condition.",1,product-team (not clinically reviewed),2026-09-03
 high_cholesterol,glute_bridge,safe,"Gentle, low-load movement with no specific concern for this condition.",3,product-team (not clinically reviewed),2026-09-03
 high_cholesterol,dead_bug,safe,"Gentle, low-load movement with no specific concern for this condition.",4,product-team (not clinically reviewed),2026-09-03
@@ -192,41 +192,41 @@ anxiety,quad_stretch,safe,"Gentle, low-load movement with no specific concern fo
 anxiety,neck_isometric,safe,"Gentle, low-load movement with no specific concern for this condition.",3,product-team (not clinically reviewed),2026-09-03
 anxiety,lower_back_side_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-09-03
 obesity,walk,safe,"Gentle, low-load movement with no specific concern for this condition.",1,product-team (not clinically reviewed),2026-09-03
-obesity,glute_bridge,safe,"Gentle, low-load movement with no specific concern for this condition.",2,product-team (not clinically reviewed),2026-09-03
-obesity,dead_bug,safe,"Gentle, low-load movement with no specific concern for this condition.",3,product-team (not clinically reviewed),2026-09-03
-obesity,shoulder_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",4,product-team (not clinically reviewed),2026-09-03
-obesity,running,modify,"Higher-impact activity — favor walking or a shorter/slower session while building fitness, to reduce joint load carrying extra body weight.",12,product-team (not clinically reviewed),2026-09-03
-obesity,ankle_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",5,product-team (not clinically reviewed),2026-09-03
-obesity,wrist_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",6,product-team (not clinically reviewed),2026-09-03
-obesity,calf_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",7,product-team (not clinically reviewed),2026-09-03
-obesity,hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-09-03
-obesity,quad_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",9,product-team (not clinically reviewed),2026-09-03
-obesity,neck_isometric,safe,"Gentle, low-load movement with no specific concern for this condition.",10,product-team (not clinically reviewed),2026-09-03
-obesity,lower_back_side_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",11,product-team (not clinically reviewed),2026-09-03
-arthritis_knee,walk,safe,"Gentle, low-load movement with no specific concern for this condition.",1,product-team (not clinically reviewed),2026-09-03
-arthritis_knee,glute_bridge,safe,"Gentle, low-load movement with no specific concern for this condition.",2,product-team (not clinically reviewed),2026-09-03
-arthritis_knee,dead_bug,safe,"Gentle, low-load movement with no specific concern for this condition.",3,product-team (not clinically reviewed),2026-09-03
-arthritis_knee,shoulder_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",5,product-team (not clinically reviewed),2026-09-03
-arthritis_knee,running,modify,"Running loads the knee joint with repeated impact. Prefer walking, or reduce distance and frequency, especially during a flare.",12,product-team (not clinically reviewed),2026-09-03
-arthritis_knee,ankle_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",4,product-team (not clinically reviewed),2026-09-03
-arthritis_knee,wrist_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",6,product-team (not clinically reviewed),2026-09-03
-arthritis_knee,calf_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",9,product-team (not clinically reviewed),2026-09-03
-arthritis_knee,hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",10,product-team (not clinically reviewed),2026-09-03
-arthritis_knee,quad_stretch,modify,"Involves deep knee flexion under stretch, which can aggravate an arthritic knee. Keep the range small and stop at any symptom change.",11,product-team (not clinically reviewed),2026-09-03
-arthritis_knee,neck_isometric,safe,"Gentle, low-load movement with no specific concern for this condition.",7,product-team (not clinically reviewed),2026-09-03
-arthritis_knee,lower_back_side_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-09-03
+obesity,glute_bridge,safe,"Gentle, low-load movement with no specific concern for this condition.",11,product-team (not clinically reviewed),2026-09-03
+obesity,dead_bug,safe,"Gentle, low-load movement with no specific concern for this condition.",24,product-team (not clinically reviewed),2026-09-03
+obesity,shoulder_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-09-03
+obesity,running,modify,"Higher-impact activity — favor walking or a shorter/slower session while building fitness, to reduce joint load carrying extra body weight.",25,product-team (not clinically reviewed),2026-09-03
+obesity,ankle_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-09-03
+obesity,wrist_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",17,product-team (not clinically reviewed),2026-09-03
+obesity,calf_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",13,product-team (not clinically reviewed),2026-09-03
+obesity,hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-09-03
+obesity,quad_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-09-03
+obesity,neck_isometric,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-09-03
+obesity,lower_back_side_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-09-03
+arthritis_knee,walk,safe,"Gentle, low-load movement with no specific concern for this condition.",2,product-team (not clinically reviewed),2026-09-03
+arthritis_knee,glute_bridge,safe,"Gentle, low-load movement with no specific concern for this condition.",5,product-team (not clinically reviewed),2026-09-03
+arthritis_knee,dead_bug,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-09-03
+arthritis_knee,shoulder_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-09-03
+arthritis_knee,running,modify,"Running loads the knee joint with repeated impact. Prefer walking, or reduce distance and frequency, especially during a flare.",25,product-team (not clinically reviewed),2026-09-03
+arthritis_knee,ankle_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",12,product-team (not clinically reviewed),2026-09-03
+arthritis_knee,wrist_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",17,product-team (not clinically reviewed),2026-09-03
+arthritis_knee,calf_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",11,product-team (not clinically reviewed),2026-09-03
+arthritis_knee,hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-09-03
+arthritis_knee,quad_stretch,modify,"Involves deep knee flexion under stretch, which can aggravate an arthritic knee. Keep the range small and stop at any symptom change.",23,product-team (not clinically reviewed),2026-09-03
+arthritis_knee,neck_isometric,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-09-03
+arthritis_knee,lower_back_side_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-09-03
 diabetes_controlled,walk,safe,"Gentle, low-load movement with no specific concern for this condition.",1,product-team (not clinically reviewed),2026-09-03
-diabetes_controlled,glute_bridge,safe,"Gentle, low-load movement with no specific concern for this condition.",2,product-team (not clinically reviewed),2026-09-03
-diabetes_controlled,dead_bug,safe,"Gentle, low-load movement with no specific concern for this condition.",3,product-team (not clinically reviewed),2026-09-03
-diabetes_controlled,shoulder_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",5,product-team (not clinically reviewed),2026-09-03
-diabetes_controlled,running,modify,"Higher-intensity/impact activity — favor walking, or reduce distance and pace, to avoid sudden intense exertion while sugar levels are being managed.",12,product-team (not clinically reviewed),2026-09-03
-diabetes_controlled,ankle_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",4,product-team (not clinically reviewed),2026-09-03
-diabetes_controlled,wrist_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",6,product-team (not clinically reviewed),2026-09-03
-diabetes_controlled,calf_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",7,product-team (not clinically reviewed),2026-09-03
-diabetes_controlled,hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-09-03
-diabetes_controlled,quad_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",9,product-team (not clinically reviewed),2026-09-03
-diabetes_controlled,neck_isometric,safe,"Gentle, low-load movement with no specific concern for this condition.",10,product-team (not clinically reviewed),2026-09-03
-diabetes_controlled,lower_back_side_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",11,product-team (not clinically reviewed),2026-09-03
+diabetes_controlled,glute_bridge,modify,"Breathe normally throughout; don't hold your breath. Straining with the breath held raises the pressure in the eyes, which matters if diabetes has affected them.",11,product-team (not clinically reviewed),2026-10-29
+diabetes_controlled,dead_bug,modify,"Breathe normally throughout; don't hold your breath. Straining with the breath held raises the pressure in the eyes, which matters if diabetes has affected them.",24,product-team (not clinically reviewed),2026-10-29
+diabetes_controlled,shoulder_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-09-03
+diabetes_controlled,running,modify,"Higher-intensity/impact activity — favor walking, or reduce distance and pace, to avoid sudden intense exertion while sugar levels are being managed.",25,product-team (not clinically reviewed),2026-09-03
+diabetes_controlled,ankle_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-09-03
+diabetes_controlled,wrist_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-09-03
+diabetes_controlled,calf_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",14,product-team (not clinically reviewed),2026-09-03
+diabetes_controlled,hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",17,product-team (not clinically reviewed),2026-09-03
+diabetes_controlled,quad_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-09-03
+diabetes_controlled,neck_isometric,modify,"Breathe normally throughout; don't hold your breath. Straining with the breath held raises the pressure in the eyes, which matters if diabetes has affected them.",21,product-team (not clinically reviewed),2026-10-29
+diabetes_controlled,lower_back_side_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-09-03
 bp_controlled,walk,safe,"Gentle, low-load movement with no specific concern for this condition.",1,product-team (not clinically reviewed),2026-09-03
 bp_controlled,glute_bridge,modify,Breathe normally throughout; don't hold your breath. Holding the breath while straining raises blood pressure sharply.,6,product-team (not clinically reviewed),2026-10-28
 bp_controlled,dead_bug,modify,Breathe normally throughout; don't hold your breath. Holding the breath while straining raises blood pressure sharply.,7,product-team (not clinically reviewed),2026-10-28
@@ -264,16 +264,16 @@ spinal_stenosis,sit_to_stand,safe,"Gentle, low-load movement with no specific co
 spinal_stenosis,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-10-28
 spinal_stenosis,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-10-28
 spinal_stenosis,wall_sit,modify,"Keep the lower back flat against the wall and the bend shallow. Stop if leg pain, numbness or tingling starts.",17,product-team (not clinically reviewed),2026-10-28
-spondylosis,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",13,product-team (not clinically reviewed),2026-10-28
-spondylosis,sit_to_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",14,product-team (not clinically reviewed),2026-10-28
-spondylosis,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-10-28
-spondylosis,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-10-28
-spondylosis,wall_sit,safe,"Gentle, low-load movement with no specific concern for this condition.",17,product-team (not clinically reviewed),2026-10-28
-arthritis_hip,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",13,product-team (not clinically reviewed),2026-10-28
-arthritis_hip,sit_to_stand,modify,Use a higher chair and push with the hands if needed; stop before hip pain.,14,product-team (not clinically reviewed),2026-10-28
-arthritis_hip,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-10-28
-arthritis_hip,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-10-28
-arthritis_hip,wall_sit,modify,Loads the hips in a bent position. Shallow bend only; stop before hip pain.,17,product-team (not clinically reviewed),2026-10-28
+spondylosis,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",9,product-team (not clinically reviewed),2026-10-28
+spondylosis,sit_to_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",10,product-team (not clinically reviewed),2026-10-28
+spondylosis,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",11,product-team (not clinically reviewed),2026-10-28
+spondylosis,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",14,product-team (not clinically reviewed),2026-10-28
+spondylosis,wall_sit,safe,"Gentle, low-load movement with no specific concern for this condition.",24,product-team (not clinically reviewed),2026-10-28
+arthritis_hip,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-10-28
+arthritis_hip,sit_to_stand,modify,Use a higher chair and push with the hands if needed; stop before hip pain.,5,product-team (not clinically reviewed),2026-10-28
+arthritis_hip,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",13,product-team (not clinically reviewed),2026-10-28
+arthritis_hip,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-10-28
+arthritis_hip,wall_sit,modify,Loads the hips in a bent position. Shallow bend only; stop before hip pain.,24,product-team (not clinically reviewed),2026-10-28
 bursitis,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",13,product-team (not clinically reviewed),2026-10-28
 bursitis,sit_to_stand,modify,"If the bursitis is in the hip or knee, use a higher chair and a small range; stop if it hurts.",14,product-team (not clinically reviewed),2026-10-28
 bursitis,wall_pushup,modify,"If the bursitis is in the shoulder or elbow, use a small range; stop if it hurts.",15,product-team (not clinically reviewed),2026-10-28
@@ -294,26 +294,26 @@ gout,sit_to_stand,modify,Loads the knees and ankles: reduce or pause during an a
 gout,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-10-28
 gout,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-10-28
 gout,wall_sit,modify,Loads the knees and ankles: reduce or pause during an acute flare. Fine between episodes.,17,product-team (not clinically reviewed),2026-10-28
-prediabetes,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",13,product-team (not clinically reviewed),2026-10-28
-prediabetes,sit_to_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",14,product-team (not clinically reviewed),2026-10-28
-prediabetes,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-10-28
-prediabetes,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-10-28
-prediabetes,wall_sit,safe,"Gentle, low-load movement with no specific concern for this condition.",17,product-team (not clinically reviewed),2026-10-28
+prediabetes,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",2,product-team (not clinically reviewed),2026-10-28
+prediabetes,sit_to_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",3,product-team (not clinically reviewed),2026-10-28
+prediabetes,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",5,product-team (not clinically reviewed),2026-10-28
+prediabetes,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",12,product-team (not clinically reviewed),2026-10-28
+prediabetes,wall_sit,modify,"Breathe normally throughout; don't hold your breath. Straining with the breath held raises the pressure in the eyes, which matters if diabetes has affected them.",13,product-team (not clinically reviewed),2026-10-29
 high_cholesterol,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",13,product-team (not clinically reviewed),2026-10-28
 high_cholesterol,sit_to_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",14,product-team (not clinically reviewed),2026-10-28
 high_cholesterol,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-10-28
 high_cholesterol,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-10-28
 high_cholesterol,wall_sit,safe,"Gentle, low-load movement with no specific concern for this condition.",17,product-team (not clinically reviewed),2026-10-28
-obesity,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",13,product-team (not clinically reviewed),2026-10-28
-obesity,sit_to_stand,modify,Use a sturdy chair with armrests and push with the hands if needed.,14,product-team (not clinically reviewed),2026-10-28
-obesity,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-10-28
-obesity,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-10-28
-obesity,wall_sit,modify,Higher body weight loads the knees in the hold. Shallow bend and short holds to start.,17,product-team (not clinically reviewed),2026-10-28
-arthritis_knee,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",13,product-team (not clinically reviewed),2026-10-28
-arthritis_knee,sit_to_stand,modify,Use a higher chair and push with the hands; stop if knee pain increases.,14,product-team (not clinically reviewed),2026-10-28
-arthritis_knee,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-10-28
-arthritis_knee,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-10-28
-arthritis_knee,wall_sit,modify,"Keep the knee bend shallow, well above chair-seat height, and stop if knee pain increases. Avoid deep bending under load.",17,product-team (not clinically reviewed),2026-10-28
+obesity,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",2,product-team (not clinically reviewed),2026-10-28
+obesity,sit_to_stand,modify,Use a sturdy chair with armrests and push with the hands if needed.,4,product-team (not clinically reviewed),2026-10-28
+obesity,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",5,product-team (not clinically reviewed),2026-10-28
+obesity,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",10,product-team (not clinically reviewed),2026-10-28
+obesity,wall_sit,modify,Higher body weight loads the knees in the hold. Shallow bend and short holds to start.,23,product-team (not clinically reviewed),2026-10-28
+arthritis_knee,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-10-28
+arthritis_knee,sit_to_stand,modify,Use a higher chair and push with the hands; stop if knee pain increases.,4,product-team (not clinically reviewed),2026-10-28
+arthritis_knee,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",13,product-team (not clinically reviewed),2026-10-28
+arthritis_knee,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-10-28
+arthritis_knee,wall_sit,modify,"Keep the knee bend shallow, well above chair-seat height, and stop if knee pain increases. Avoid deep bending under load.",24,product-team (not clinically reviewed),2026-10-28
 pcos,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",13,product-team (not clinically reviewed),2026-10-28
 pcos,sit_to_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",14,product-team (not clinically reviewed),2026-10-28
 pcos,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-10-28
@@ -329,13 +329,173 @@ anxiety,march_in_place,safe,"Gentle, low-load movement with no specific concern 
 anxiety,sit_to_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-10-28
 anxiety,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-10-28
 anxiety,wall_sit,safe,"Gentle, low-load movement with no specific concern for this condition.",17,product-team (not clinically reviewed),2026-10-28
-diabetes_controlled,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",13,product-team (not clinically reviewed),2026-10-28
-diabetes_controlled,sit_to_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",14,product-team (not clinically reviewed),2026-10-28
-diabetes_controlled,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-10-28
-diabetes_controlled,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-10-28
-diabetes_controlled,wall_sit,safe,"Gentle, low-load movement with no specific concern for this condition.",17,product-team (not clinically reviewed),2026-10-28
+diabetes_controlled,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",2,product-team (not clinically reviewed),2026-10-28
+diabetes_controlled,sit_to_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",3,product-team (not clinically reviewed),2026-10-28
+diabetes_controlled,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",5,product-team (not clinically reviewed),2026-10-28
+diabetes_controlled,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",12,product-team (not clinically reviewed),2026-10-28
+diabetes_controlled,wall_sit,modify,"Breathe normally throughout; don't hold your breath. Straining with the breath held raises the pressure in the eyes, which matters if diabetes has affected them.",13,product-team (not clinically reviewed),2026-10-29
 bp_controlled,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",2,product-team (not clinically reviewed),2026-10-28
 bp_controlled,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",4,product-team (not clinically reviewed),2026-10-28
 bp_controlled,sit_to_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",3,product-team (not clinically reviewed),2026-10-28
 bp_controlled,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",5,product-team (not clinically reviewed),2026-10-28
 bp_controlled,wall_sit,modify,"BP rises during a held position. Breathe normally throughout, never hold your breath, and keep holds short to start.",8,product-team (not clinically reviewed),2026-10-28
+chronic_back_pain,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-10-29
+herniated_disk,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-10-29
+degenerative_disc,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-10-29
+spinal_stenosis,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-10-29
+spondylosis,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",12,product-team (not clinically reviewed),2026-10-29
+arthritis_hip,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",6,product-team (not clinically reviewed),2026-10-29
+bursitis,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-10-29
+carpal_tunnel,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-10-29
+sprain_strain,calf_raise,modify,"Injury site is not captured, so no movement can be assumed clear of it. Avoid anything that loads the injured area.",18,product-team (not clinically reviewed),2026-10-29
+gout,calf_raise,modify,"Rises onto the toes, loading the big-toe joint: reduce or pause during an acute flare. Fine between episodes.",18,product-team (not clinically reviewed),2026-10-29
+none,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-10-29
+prediabetes,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",4,product-team (not clinically reviewed),2026-10-29
+high_cholesterol,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-10-29
+pcos,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-10-29
+depression,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-10-29
+anxiety,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-10-29
+obesity,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",6,product-team (not clinically reviewed),2026-10-29
+arthritis_knee,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",6,product-team (not clinically reviewed),2026-10-29
+diabetes_controlled,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",4,product-team (not clinically reviewed),2026-10-29
+bp_controlled,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-10-29
+chronic_back_pain,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-10-29
+herniated_disk,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-10-29
+degenerative_disc,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-10-29
+spinal_stenosis,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-10-29
+spondylosis,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-10-29
+arthritis_hip,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",4,product-team (not clinically reviewed),2026-10-29
+bursitis,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-10-29
+carpal_tunnel,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-10-29
+sprain_strain,seated_knee_extension,modify,"Injury site is not captured, so no movement can be assumed clear of it. Avoid anything that loads the injured area.",19,product-team (not clinically reviewed),2026-10-29
+gout,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-10-29
+none,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-10-29
+prediabetes,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",6,product-team (not clinically reviewed),2026-10-29
+high_cholesterol,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-10-29
+pcos,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-10-29
+depression,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-10-29
+anxiety,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-10-29
+obesity,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",7,product-team (not clinically reviewed),2026-10-29
+arthritis_knee,seated_knee_extension,modify,"Strengthens the thigh muscle that supports the knee. Use a small range if straightening hurts, and no ankle weights.",1,product-team (not clinically reviewed),2026-10-29
+diabetes_controlled,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",6,product-team (not clinically reviewed),2026-10-29
+bp_controlled,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",19,product-team (not clinically reviewed),2026-10-29
+chronic_back_pain,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-10-29
+herniated_disk,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-10-29
+degenerative_disc,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-10-29
+spinal_stenosis,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-10-29
+spondylosis,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-10-29
+arthritis_hip,single_leg_stand,modify,"Puts the full body weight on one leg. Keep holding the support, start on the less painful leg, and stop if the joint hurts.",9,product-team (not clinically reviewed),2026-10-29
+bursitis,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-10-29
+carpal_tunnel,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-10-29
+sprain_strain,single_leg_stand,modify,"Injury site is not captured, so no movement can be assumed clear of it. Avoid anything that loads the injured area.",20,product-team (not clinically reviewed),2026-10-29
+gout,single_leg_stand,modify,Loads the feet and ankles: reduce or pause during an acute flare. Fine between episodes.,20,product-team (not clinically reviewed),2026-10-29
+none,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-10-29
+prediabetes,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-10-29
+high_cholesterol,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-10-29
+pcos,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-10-29
+depression,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-10-29
+anxiety,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-10-29
+obesity,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",9,product-team (not clinically reviewed),2026-10-29
+arthritis_knee,single_leg_stand,modify,"Puts the full body weight on one leg. Keep holding the support, start on the less painful leg, and stop if the joint hurts.",9,product-team (not clinically reviewed),2026-10-29
+diabetes_controlled,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-10-29
+bp_controlled,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",20,product-team (not clinically reviewed),2026-10-29
+chronic_back_pain,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-10-29
+herniated_disk,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-10-29
+degenerative_disc,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-10-29
+spinal_stenosis,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-10-29
+spondylosis,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-10-29
+arthritis_hip,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",14,product-team (not clinically reviewed),2026-10-29
+bursitis,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-10-29
+carpal_tunnel,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-10-29
+sprain_strain,heel_toe_walk,modify,"Injury site is not captured, so no movement can be assumed clear of it. Avoid anything that loads the injured area.",21,product-team (not clinically reviewed),2026-10-29
+gout,heel_toe_walk,modify,Loads the feet and ankles: reduce or pause during an acute flare. Fine between episodes.,21,product-team (not clinically reviewed),2026-10-29
+none,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-10-29
+prediabetes,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",9,product-team (not clinically reviewed),2026-10-29
+high_cholesterol,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-10-29
+pcos,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-10-29
+depression,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-10-29
+anxiety,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-10-29
+obesity,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",12,product-team (not clinically reviewed),2026-10-29
+arthritis_knee,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",14,product-team (not clinically reviewed),2026-10-29
+diabetes_controlled,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",9,product-team (not clinically reviewed),2026-10-29
+bp_controlled,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-10-29
+chronic_back_pain,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-10-29
+herniated_disk,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-10-29
+degenerative_disc,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-10-29
+spinal_stenosis,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-10-29
+spondylosis,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-10-29
+arthritis_hip,standing_hip_abduction,modify,Moves the hip joint directly. Small range with the body upright; stop before hip pain.,2,product-team (not clinically reviewed),2026-10-29
+bursitis,standing_hip_abduction,modify,"If the bursitis is at the outer hip, lifting the leg sideways works the muscles over it. Small range only; stop if it hurts.",22,product-team (not clinically reviewed),2026-10-29
+carpal_tunnel,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-10-29
+sprain_strain,standing_hip_abduction,modify,"Injury site is not captured, so no movement can be assumed clear of it. Avoid anything that loads the injured area.",22,product-team (not clinically reviewed),2026-10-29
+gout,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-10-29
+none,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-10-29
+prediabetes,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",7,product-team (not clinically reviewed),2026-10-29
+high_cholesterol,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-10-29
+pcos,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-10-29
+depression,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-10-29
+anxiety,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-10-29
+obesity,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-10-29
+arthritis_knee,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",3,product-team (not clinically reviewed),2026-10-29
+diabetes_controlled,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",7,product-team (not clinically reviewed),2026-10-29
+bp_controlled,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-10-29
+chronic_back_pain,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-10-29
+herniated_disk,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-10-29
+degenerative_disc,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-10-29
+spinal_stenosis,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-10-29
+spondylosis,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",13,product-team (not clinically reviewed),2026-10-29
+arthritis_hip,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",7,product-team (not clinically reviewed),2026-10-29
+bursitis,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-10-29
+carpal_tunnel,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-10-29
+sprain_strain,seated_march,modify,"Injury site is not captured, so no movement can be assumed clear of it. Avoid anything that loads the injured area.",23,product-team (not clinically reviewed),2026-10-29
+gout,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-10-29
+none,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-10-29
+prediabetes,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",10,product-team (not clinically reviewed),2026-10-29
+high_cholesterol,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-10-29
+pcos,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-10-29
+depression,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-10-29
+anxiety,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-10-29
+obesity,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",3,product-team (not clinically reviewed),2026-10-29
+arthritis_knee,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",7,product-team (not clinically reviewed),2026-10-29
+diabetes_controlled,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",10,product-team (not clinically reviewed),2026-10-29
+bp_controlled,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-10-29
+chronic_back_pain,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",24,product-team (not clinically reviewed),2026-10-29
+herniated_disk,chair_hamstring_stretch,modify,"Keep the back straight and lean only a little from the hips; don't round the lower back. Stop if leg pain, numbness or tingling starts.",24,product-team (not clinically reviewed),2026-10-29
+degenerative_disc,chair_hamstring_stretch,modify,"Keep the back straight and lean only a little from the hips; don't round the lower back. Stop if leg pain, numbness or tingling starts.",24,product-team (not clinically reviewed),2026-10-29
+spinal_stenosis,chair_hamstring_stretch,modify,"Keep the back straight and lean only a little from the hips; don't round the lower back. Stop if leg pain, numbness or tingling starts.",24,product-team (not clinically reviewed),2026-10-29
+spondylosis,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-10-29
+arthritis_hip,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",10,product-team (not clinically reviewed),2026-10-29
+bursitis,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",24,product-team (not clinically reviewed),2026-10-29
+carpal_tunnel,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",24,product-team (not clinically reviewed),2026-10-29
+sprain_strain,chair_hamstring_stretch,modify,"Injury site is not captured, so no movement can be assumed clear of it. Avoid anything that loads the injured area.",24,product-team (not clinically reviewed),2026-10-29
+gout,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",24,product-team (not clinically reviewed),2026-10-29
+none,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",24,product-team (not clinically reviewed),2026-10-29
+prediabetes,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-10-29
+high_cholesterol,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",24,product-team (not clinically reviewed),2026-10-29
+pcos,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",24,product-team (not clinically reviewed),2026-10-29
+depression,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",24,product-team (not clinically reviewed),2026-10-29
+anxiety,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",24,product-team (not clinically reviewed),2026-10-29
+obesity,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",14,product-team (not clinically reviewed),2026-10-29
+arthritis_knee,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",10,product-team (not clinically reviewed),2026-10-29
+diabetes_controlled,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-10-29
+bp_controlled,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",24,product-team (not clinically reviewed),2026-10-29
+chronic_back_pain,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",25,product-team (not clinically reviewed),2026-10-29
+herniated_disk,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",25,product-team (not clinically reviewed),2026-10-29
+degenerative_disc,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",25,product-team (not clinically reviewed),2026-10-29
+spinal_stenosis,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",25,product-team (not clinically reviewed),2026-10-29
+spondylosis,chin_tuck,modify,"Move gently and only as far as is comfortable. Stop if pain, numbness or tingling spreads into the arm.",1,product-team (not clinically reviewed),2026-10-29
+arthritis_hip,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-10-29
+bursitis,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",25,product-team (not clinically reviewed),2026-10-29
+carpal_tunnel,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",25,product-team (not clinically reviewed),2026-10-29
+sprain_strain,chin_tuck,modify,"Injury site is not captured, so no movement can be assumed clear of it. Avoid anything that loads the injured area.",25,product-team (not clinically reviewed),2026-10-29
+gout,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",25,product-team (not clinically reviewed),2026-10-29
+none,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",25,product-team (not clinically reviewed),2026-10-29
+prediabetes,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-10-29
+high_cholesterol,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",25,product-team (not clinically reviewed),2026-10-29
+pcos,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",25,product-team (not clinically reviewed),2026-10-29
+depression,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",25,product-team (not clinically reviewed),2026-10-29
+anxiety,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",25,product-team (not clinically reviewed),2026-10-29
+obesity,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-10-29
+arthritis_knee,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-10-29
+diabetes_controlled,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-10-29
+bp_controlled,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",25,product-team (not clinically reviewed),2026-10-29

@@ -40,10 +40,19 @@ def test_a_rejected_draft_is_never_shown(db):
 
 def test_the_newest_approved_plan_wins(db):
     now = datetime.now(timezone.utc)
-    approved(db, "p1", [item("walk", 1, 1)], "old", when=now - timedelta(days=3))
-    approved(db, "p1", [item("walk", 1, 2)], "new", when=now)
+    approved(db, "p1", [item("walk", 1, 10)], "old", when=now - timedelta(days=3))
+    approved(db, "p1", [item("walk", 1, 20)], "new", when=now)
     out = plans.patient_plan(db, plans.latest_plan(db, "p1"), "Dr Rao")
-    assert out["instructions"] == "new" and out["exercises"][0]["dose"] == "2 km"
+    assert out["instructions"] == "new" and out["exercises"][0]["dose"] == "20 minutes"
+
+
+def test_a_plan_approved_when_walking_was_in_km_still_says_km(db):
+    """Walking moved from km to minutes on 2026-10-29: a plan keeps the unit
+    it was approved with."""
+    plan = approved(db, "p1", [item("walk", 1, 2)])
+    plan.exercises = [{**plan.exercises[0], "unit": "km"}]
+    db.flush()
+    assert plans.patient_plan(db, plan, None)["exercises"][0]["dose"] == "2 km"
 
 
 def test_patient_sees_only_the_plan(db):
@@ -67,13 +76,14 @@ def test_exercise_details_come_from_the_exercise_table(db):
 
 
 def test_doses_in_plain_words(db):
-    out = plans.patient_plan(db, approved(db, "p1", [item("glute_bridge", 2, 5), item("walk", 1, 1.5),
+    out = plans.patient_plan(db, approved(db, "p1", [item("glute_bridge", 2, 5), item("running", 1, 1.5),
                                                      item("neck_isometric", 3, 20)]), None)
     assert [e["dose"] for e in out["exercises"]] == ["2 sets × 5 repetitions", "1.5 km", "3 sets × hold 20 seconds"]
 
 
 def test_no_steps_and_no_rest_still_shows(db):
-    e = plans.patient_plan(db, approved(db, "p1", [item("walk", 1, 1)]), None)["exercises"][0]
+    # Without the reference DB the original exercises have no steps.
+    e = plans.patient_plan(db, approved(db, "p1", [item("glute_bridge", 1, 5)]), None)["exercises"][0]
     assert e["steps"] == [] and e["rest_seconds"] is None  # one set: no rest between sets
 
 

@@ -49,7 +49,7 @@ class Exercise(Base):
     progression_step: Mapped[float] = mapped_column(Float, default=1)
     priority_order: Mapped[int] = mapped_column(Integer, default=0)
     # Properties the reading rules (ReadingRule) select on
-    exercise_type: Mapped[str] = mapped_column(String(16), default="")  # aerobic | strength | isometric | mobility | stretch | breathing
+    exercise_type: Mapped[str] = mapped_column(String(16), default="")  # aerobic | strength | isometric | mobility | stretch | breathing | balance
     intensity: Mapped[str] = mapped_column(String(16), default="")  # light | moderate | vigorous
     breath_hold: Mapped[bool] = mapped_column(Boolean, default=False)  # people tend to hold their breath (straining or holding)
     position: Mapped[str] = mapped_column(String(16), default="")  # standing | chair | floor

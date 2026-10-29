@@ -31,8 +31,8 @@ def test_doctor_can_approve_an_avoid_exercise_and_a_big_dose(db):
 
 
 def test_doctor_edit_keeps_names_units_and_notes(db):
-    out = plans.doctor_exercises(db, [item("walk", 1, 2.5, "  morning only ")])
-    assert out == [{"activity_type": "walk", "name": "Walking", "unit": "km", "sets": 1, "amount": 2.5,
+    out = plans.doctor_exercises(db, [item("walk", 1, 20, "  morning only ")])
+    assert out == [{"activity_type": "walk", "name": "Walking", "unit": "min", "sets": 1, "amount": 20,
                     "notes": "morning only"}]
 
 

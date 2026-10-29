@@ -80,7 +80,7 @@ def init_store() -> None:
 
 # Allowed values of the exercise properties the reading rules select on.
 EXERCISE_PROPERTIES = {
-    "exercise_type": {"aerobic", "strength", "isometric", "mobility", "stretch", "breathing"},
+    "exercise_type": {"aerobic", "strength", "isometric", "mobility", "stretch", "breathing", "balance"},
     "intensity": {"light", "moderate", "vigorous"},
     "position": {"standing", "chair", "floor"},
     "impact": {"low", "high"},

@@ -63,12 +63,12 @@ def test_140_band_leaves_out_holds_and_vigorous(db, reading):
     assert any("Wall Sit" in line and "Neck Hold" in line for line in lines)
 
 
-def test_160_band_only_walking_breathing_mobility(db):
+def test_160_band_only_walking_balance_breathing_mobility(db):
     kinds, _ = allowed(db, bp(165, 95))
     by_type = {e.activity_type: e for e in db.scalars(select(Exercise))}
-    assert kinds and all(by_type[k].exercise_type in ("aerobic", "breathing", "mobility") for k in kinds)
+    assert kinds and all(by_type[k].exercise_type in ("aerobic", "balance", "breathing", "mobility") for k in kinds)
     assert all(by_type[k].intensity != "vigorous" for k in kinds)
-    assert {"walk", "march_in_place", "slow_breathing"} <= kinds and "sit_to_stand" not in kinds
+    assert {"walk", "march_in_place", "slow_breathing", "single_leg_stand"} <= kinds and "sit_to_stand" not in kinds
 
 
 def test_180_band_no_exercise_plan(db):

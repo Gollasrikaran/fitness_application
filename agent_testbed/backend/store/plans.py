@@ -39,9 +39,8 @@ EXERCISES_BY_EXPERIENCE = {"beginner": 4, "intermediate": 5, "active": 7}
 DEFAULT_EXPERIENCE = "beginner"
 
 # PROVISIONAL thresholds so we can build; the doctor confirms or replaces them.
-OLDER_AGE = 60         # at or above: high-impact exercises left out, doses one step lower
-HIGH_BMI = 30.0        # at or above: high-impact exercises left out
-HIGH_IMPACT = {"running"}
+OLDER_AGE = 60         # at or above: high-impact and floor exercises left out, doses one step lower
+HIGH_BMI = 30.0        # at or above: high-impact and floor exercises left out (Exercise.impact, Exercise.position)
 MAX_EXERCISES = 5      # in any draft the agent makes
 
 # Which reading counts (decided 2026-10-28): the latest, if within this many
@@ -176,11 +175,14 @@ def candidates(db: Session, codes: list[str], age: int | None,
     by_type = {e.activity_type: e for e in db.scalars(select(Exercise))}
     older = age is not None and age >= OLDER_AGE
     if older or (bmi is not None and bmi >= HIGH_BMI):
-        dropped = [e["display_name"] for e in approved if e["activity_type"] in HIGH_IMPACT]
-        approved = [e for e in approved if e["activity_type"] not in HIGH_IMPACT]
-        if dropped:
-            why = f"age {age} >= {OLDER_AGE}" if older else f"BMI {bmi} >= {HIGH_BMI:g}"
-            rules.append(f"{', '.join(dropped)} left out: {why} (provisional rule)")
+        why = f"age {age} >= {OLDER_AGE}" if older else f"BMI {bmi} >= {HIGH_BMI:g}"
+        # Floor: getting down and up again is hard for older or heavier patients.
+        for what, left_out in (("high impact", lambda ex: ex.impact == "high"),
+                               ("on the floor", lambda ex: ex.position == "floor")):
+            dropped = [e["display_name"] for e in approved if left_out(by_type[e["activity_type"]])]
+            approved = [e for e in approved if not left_out(by_type[e["activity_type"]])]
+            if dropped:
+                rules.append(f"{', '.join(dropped)} left out ({what}): {why} (provisional rule)")
     # "safe" before "modify": a starter plan stays moderate.
     approved.sort(key=lambda e: (e["verdict"] == "modify", ranks.get(e["activity_type"], 99),
                                  by_type[e["activity_type"]].priority_order))
