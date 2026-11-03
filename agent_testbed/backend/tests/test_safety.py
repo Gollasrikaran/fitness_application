@@ -194,13 +194,14 @@ def test_no_ai_answer_lowers_severity_or_removes_a_condition(ref):
 
         baseline = finalize(ctx, ref, rules(), ai("mild"), [])
         answer = ai(rng.choice(list(RANK)))
-        ai_codes = rng.sample(codes + ["bp_any", "diabetes_any"], rng.randint(0, 3))
+        ai_codes = rng.sample(codes + ["bp_any", "diabetes_any", "asthma_any"], rng.randint(0, 3))
         out = finalize(ctx, ref, rules(), answer,
                        [Finding(c, "ai", "visit 2026-10-20, diagnosis", "x") for c in ai_codes])
         assert RANK[out["severity"]] >= RANK[baseline["severity"]]
         assert set(baseline["severe_reasons"]) <= set(out["severe_reasons"])
         # A condition the rules found stays, or only gets stricter (controlled -> not controlled).
-        stricter = {"bp_controlled": "high_bp", "diabetes_controlled": "diabetes"}
+        stricter = {"bp_controlled": "high_bp", "diabetes_controlled": "diabetes",
+                    "asthma_controlled": "asthma_uncontrolled"}
         for code in set(baseline["codes"]) - {"none"}:
             assert code in out["codes"] or stricter.get(code) in out["codes"]
         if any(ref.conditions[c]["bucket"] == "refer" for c in out["codes"] if c != "none"):

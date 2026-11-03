@@ -28,7 +28,7 @@ from agent.conditions import Finding, RuleResult, has_phrase, load_reference, ru
 from agent.llm import MODEL, chat_model
 from agent.prompts import ASSESS
 from agent.routing import finalize
-from app import clinic
+from app.source import clinic
 from store import assessments as assessment_store
 from store import plans as plan_store
 from store.db import session
@@ -75,7 +75,8 @@ def _ask_ai(record: dict, ref, rules: RuleResult, today: date) -> AIAssessment:
                            for code, c in ref.conditions.items() if code != "none")
     # bp_any / diabetes_any are the rules' "controlled or not, to be decided" markers.
     shown = {"bp_any": "blood pressure (controlled or not: decided from vital flags)",
-             "diabetes_any": "diabetes (controlled or not: decided from vital flags)"}
+             "diabetes_any": "diabetes (controlled or not: decided from vital flags)",
+             "asthma_any": "asthma (controlled or not: decided by the rules)"}
     found = "\n".join(sorted({f"- {shown.get(f.code, f.code)}: {f.where}: \"{f.quote}\""
                               for f in rules.findings})) or "- nothing"
     prompt = ASSESS.format(today=today.isoformat(), conditions=conditions, found=found)
@@ -86,8 +87,9 @@ def _ask_ai(record: dict, ref, rules: RuleResult, today: date) -> AIAssessment:
 
 # Whether BP or sugar is under control is the clinic's vital flags' call, not
 # the AI's: an AI "not controlled" stands only when the record itself says so.
-_FLAGS_DECIDE = {"high_bp": "bp_any", "diabetes": "diabetes_any"}
-_SAYS_UNCONTROLLED = re.compile(r"uncontrol|not (under )?control|poor(ly)? control|urgency|crisis", re.I)
+_FLAGS_DECIDE = {"high_bp": "bp_any", "diabetes": "diabetes_any", "asthma_uncontrolled": "asthma_any"}
+_SAYS_UNCONTROLLED = re.compile(r"uncontrol|not (under )?control|poor(ly)? control|urgency|crisis|exacerbation",
+                                re.I)
 
 
 def _check(ai: AIAssessment, ref, record: dict) -> tuple[list[Finding], list[dict], list[str]]:
@@ -97,7 +99,8 @@ def _check(ai: AIAssessment, ref, record: dict) -> tuple[list[Finding], list[dic
     record_words = words(" | ".join(_strings(record)))
     kept, dropped, concerns = [], [], []
     for f in ai.conditions:
-        if (f.code not in ref.conditions and f.code not in ("bp_any", "diabetes_any")) or f.code == "none":
+        if (f.code not in ref.conditions and f.code not in ("bp_any", "diabetes_any", "asthma_any")) \
+                or f.code == "none":
             dropped.append({**f.model_dump(), "why": "not a code in the reference list"})
         elif not has_phrase(record_words, words(f.quote)):
             dropped.append({**f.model_dump(), "why": "quote not found in the record"})

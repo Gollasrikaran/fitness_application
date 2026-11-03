@@ -85,6 +85,25 @@ def doctor_name(doctor_id: str) -> str | None:
     return (row or {}).get("name") or None
 
 
+def patient_doctors(patient_id: str) -> list[dict]:
+    """The doctors who saw this patient (completed visits), most visits first.
+    Empty for an unknown id or a child."""
+    try:
+        return fetch_all(f"""
+            SELECT u.id::text AS id, trim(concat_ws(' ', u.first_name, u.last_name)) AS name,
+                   count(*) AS visits, max(v.created_at)::date AS last_visit
+            FROM visit v
+            JOIN patient p ON p.id = v.patient_id
+            JOIN "user" u ON u.id = v.assigned_doctor_user_id
+            WHERE v.patient_id = %(id)s::uuid AND v.deleted_at IS NULL AND v.status = 'COMPLETED'
+              AND {_LIVE_PATIENT} AND p.age_years >= %(min_age)s
+            GROUP BY u.id
+            ORDER BY visits DESC, last_visit DESC
+        """, {"id": patient_id, "min_age": MIN_AGE})
+    except Exception:  # not a clinic id
+        return []
+
+
 def patient_briefs(ids: list[str]) -> dict[str, dict]:
     """Age and sex for a list of patients (e.g. the review queue), by id."""
     if not ids:

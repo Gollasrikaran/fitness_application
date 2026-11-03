@@ -97,8 +97,9 @@ class ConditionAlias(Base):
     source: long_term_condition (the clinic's condition list, exact name) |
             health_history (questionnaire key) | text (a phrase in a diagnosis
             or chief complaint, matched as whole words).
-    code: one of our condition codes, or bp_any / diabetes_any, which the
-    safety rules turn into controlled or not from the recent vital flags."""
+    code: one of our condition codes, or bp_any / diabetes_any / asthma_any,
+    which the safety rules turn into controlled or not (BP and sugar from the
+    recent vital flags; asthma from complaints, emergency visits and SpO2)."""
     __tablename__ = "condition_aliases"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     source: Mapped[str] = mapped_column(String(24))

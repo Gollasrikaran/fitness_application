@@ -126,7 +126,7 @@ def reading_rules() -> list[dict]:
 
 
 # Not condition codes: the safety rules decide controlled or not (agent/conditions.py).
-ALIAS_MARKERS = {"bp_any", "diabetes_any"}
+ALIAS_MARKERS = {"bp_any", "diabetes_any", "asthma_any"}
 
 
 def _aliases(conditions: dict) -> list[dict]:

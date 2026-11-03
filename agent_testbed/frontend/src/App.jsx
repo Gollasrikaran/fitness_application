@@ -9,11 +9,12 @@ import PatientPlan from "./PatientPlan.jsx";
 // right-hand panel shows exactly what the agent knows about that patient.
 
 const sexShort = (s) => ({ FEMALE: "F", MALE: "M", OTHER: "O" })[s] || "?";
+const FULL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const pretty = (s) => String(s || "").replace(/_/g, " ").toLowerCase();
 
 function patientLabel(p) {
   const history = p.history.length ? ` · ${p.history.map(pretty).join(", ")}` : "";
-  return `#${p.id.slice(0, 8)} · ${p.age} ${sexShort(p.sex)} · ${p.visits} visits · last ${p.last_visit}${history}`;
+  return `#${p.id.slice(0, 8)} · ${p.age ?? "?"} ${sexShort(p.sex)} · ${p.visits} visits · last ${p.last_visit}${history}`;
 }
 
 export default function App() {
@@ -23,6 +24,8 @@ export default function App() {
   const [patients, setPatients] = useState([]);
   const [patientId, setPatientId] = useState("");
   const [search, setSearch] = useState("");
+  // The doctors who saw the chosen patient: {patientId, list}.
+  const [seenBy, setSeenBy] = useState(null);
   const [error, setError] = useState("");
   // Bumped after each reply or review, so the side panels reload.
   const [version, setVersion] = useState(0);
@@ -32,15 +35,12 @@ export default function App() {
     api("GET", "/doctors").then(setDoctors).catch((e) => setError(`Couldn't load doctors: ${e.message}`));
   }, []);
 
-  // Patient list: everyone (patient mode) or the chosen doctor's patients.
+  // Patient list: the chosen doctor's patients, or everyone (patient mode, or
+  // a doctor-mode user picking the patient first).
   useEffect(() => {
-    if (mode === "doctor" && !doctorId) {
-      setPatients([]);
-      return;
-    }
     const t = setTimeout(() => {
       const params = new URLSearchParams({ limit: "200" });
-      if (mode === "doctor") params.set("doctor_id", doctorId);
+      if (mode === "doctor" && doctorId) params.set("doctor_id", doctorId);
       if (search.trim()) params.set("search", search.trim());
       api("GET", `/patients?${params}`)
         .then(setPatients)
@@ -49,6 +49,33 @@ export default function App() {
     return () => clearTimeout(t);
   }, [mode, doctorId, search]);
 
+  // A full patient id typed in: open that patient straight away.
+  useEffect(() => {
+    const id = search.trim().toLowerCase();
+    if (FULL_ID.test(id)) setPatientId(id);
+  }, [search]);
+
+  // Doctor mode: load the chosen patient's doctors, and if the doctor picked
+  // isn't one of them, switch to the one who saw the patient most.
+  useEffect(() => {
+    if (mode !== "doctor" || !patientId) return;
+    let live = true;
+    api("GET", `/patients/${patientId}/doctors`)
+      .then((list) => {
+        if (!live) return;
+        setSeenBy({ patientId, list });
+        if (!list.length) setError(`No doctors found for patient #${patientId.slice(0, 8)} (unknown id, or under 18).`);
+        else {
+          setError("");
+          setDoctorId((current) => (list.some((d) => d.id === current) ? current : list[0].id));
+        }
+      })
+      .catch((e) => live && setError(`Couldn't load the patient's doctors: ${e.message}`));
+    return () => {
+      live = false;
+    };
+  }, [mode, patientId]);
+
   function switchMode(next) {
     setMode(next);
     setPatientId("");
@@ -56,6 +83,8 @@ export default function App() {
   }
 
   const doctor = doctors.find((d) => d.id === doctorId);
+  const patientDoctors = seenBy && seenBy.patientId === patientId ? seenBy.list : [];
+  const others = doctors.filter((d) => !patientDoctors.some((s) => s.id === d.id));
   return (
     <div className="app">
       <header className="topbar">
@@ -78,26 +107,44 @@ export default function App() {
             <select
               value={doctorId}
               onChange={(e) => {
-                setDoctorId(e.target.value);
-                setPatientId("");
+                const id = e.target.value;
+                setDoctorId(id);
+                if (!patientDoctors.some((d) => d.id === id)) {
+                  setPatientId(""); // another doctor's list: start over
+                  setSearch("");
+                }
               }}
             >
               <option value="">Choose a doctor…</option>
-              {doctors.map((d) => (
-                <option key={d.id} value={d.id}>
-                  Dr. {d.name}
-                  {d.specialization ? ` (${d.specialization})` : ""} · {d.patients} patients
-                </option>
-              ))}
+              {patientDoctors.length > 0 && (
+                <optgroup label={`Saw patient #${patientId.slice(0, 8)}`}>
+                  {patientDoctors.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      Dr. {d.name || d.id.slice(0, 8)} · {d.visits} visits with this patient · last {d.last_visit}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              <optgroup label={patientDoctors.length ? "All other doctors" : "All doctors"}>
+                {others.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    Dr. {d.name}
+                    {d.specialization ? ` (${d.specialization})` : ""} · {d.patients} patients
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </label>
         )}
         <label className="grow">
           {mode === "doctor" ? "Patient to ask about" : "View as patient"}
-          <select value={patientId} onChange={(e) => setPatientId(e.target.value)} disabled={!patients.length}>
+          <select value={patientId} onChange={(e) => setPatientId(e.target.value)} disabled={!patients.length && !patientId}>
             <option value="">
-              {mode === "doctor" && !doctorId ? "Choose a doctor first" : `Choose a patient… (${patients.length})`}
+              {`Choose a patient… (${patients.length})`}
             </option>
+            {patientId && !patients.some((p) => p.id === patientId) && (
+              <option value={patientId}>#{patientId.slice(0, 8)} · found by id</option>
+            )}
             {patients.map((p) => (
               <option key={p.id} value={p.id}>
                 {patientLabel(p)}
@@ -107,7 +154,7 @@ export default function App() {
         </label>
         <label>
           Find by patient id
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="first characters of the id" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="first characters, or the full id" />
         </label>
       </div>
       {error && <p className="error pad">{error}</p>}
@@ -115,10 +162,10 @@ export default function App() {
         <ReviewQueue doctor={doctor} version={version} current={patientId} onOpen={setPatientId} />
       )}
 
-      {!patientId ? (
+      {!patientId || (mode === "doctor" && !doctor) ? (
         <p className="muted center">
           {mode === "doctor"
-            ? "Pick a doctor, then one of their patients, to ask the agent about them."
+            ? "Pick a doctor then a patient, or paste a full patient id: their doctor is picked for you."
             : "Pick a patient to see the plan their doctor approved."}
         </p>
       ) : mode === "patient" ? (
@@ -243,6 +290,8 @@ function ContextPanel({ patientId }) {
   if (!ctx) return <p className="muted">Loading what the agent sees…</p>;
 
   const { patient, body, conditions, vital_flags, vitals_recent, medicines, care, alerts, history_other } = ctx;
+  const summary = ctx.clinical_summary;
+  const labs = ctx.labs || [];
   return (
     <>
       <div className="card">
@@ -281,6 +330,40 @@ function ContextPanel({ patientId }) {
           </Row>
         ))}
       </Section>
+
+      {summary && (
+        <Section title="Clinical flags">
+          <Row>
+            Exercise:{" "}
+            <span className={`badge ${summary.exercise_suitable === false ? "emergency" : "routine"}`}>
+              {summary.exercise_suitable === false ? "not suitable" : summary.exercise_suitable ? "suitable" : "not assessed"}
+            </span>
+            {summary.patient_type ? ` · main type ${summary.patient_type}` : ""}
+          </Row>
+          {summary.flags.map((f, i) => (
+            <Row key={i}>
+              <span className={`badge ${f.level === "high" ? "emergency" : "priority"}`}>{f.level}</span> {f.title}
+              {f.evidence && <div className="muted">{f.evidence}</div>}
+            </Row>
+          ))}
+        </Section>
+      )}
+
+      {labs.length > 0 && (
+        <Section title="Lab results">
+          {labs.map((l, i) => (
+            <Row key={i}>
+              {l.date}: {l.name} {l.value}
+              {l.status && (
+                <>
+                  {" "}
+                  <span className={`badge ${labBadge(l.status)}`}>{l.status}</span>
+                </>
+              )}
+            </Row>
+          ))}
+        </Section>
+      )}
 
       <Section title="Conditions">
         {conditions.doctor_recorded.map((c, i) => (
@@ -390,8 +473,18 @@ const VITAL_COLUMNS = [
   ["pulse", "Pulse"],
   ["spo2", "SpO₂"],
   ["sugar_mg_dl", "Sugar"],
+  ["hb", "Hb"],
   ["weight_kg", "Wt"],
 ];
+
+// A lab's status as the report gave it: "Critical (Low)", "High", "Normal", "Unverified (check source)".
+function labBadge(status) {
+  const s = status.toLowerCase();
+  if (s.startsWith("critical")) return "emergency";
+  if (s.startsWith("normal")) return "routine";
+  if (s.startsWith("unverified")) return "";
+  return "priority";
+}
 
 function VitalsTable({ rows }) {
   return (
@@ -409,7 +502,14 @@ function VitalsTable({ rows }) {
           <tr key={i}>
             <td>{r.date}</td>
             {VITAL_COLUMNS.map(([key]) => (
-              <td key={key}>{r[key] ?? (key === "bp" && r.bp_sys ? `${r.bp_sys}/${r.bp_dia}` : "–")}</td>
+              <td key={key}>
+                {r[key] ??
+                  (key === "bp" && r.bp_sys
+                    ? `${r.bp_sys}/${r.bp_dia}`
+                    : key === "sugar_mg_dl"
+                      ? r.fasting_sugar_mg_dl ?? r.nonfasting_sugar_mg_dl ?? "–"
+                      : "–")}
+              </td>
             ))}
           </tr>
         ))}

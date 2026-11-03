@@ -20,6 +20,12 @@ class Settings:
     # The live clinic database (the one dataanalysis/ reads). Read-only: every
     # connection is opened with default_transaction_read_only=on.
     clinic_database_url: str = os.environ.get("CLINIC_DATABASE_URL", "").strip().strip('"')
+    # Where patient records come from: "db" (the clinic database above, for
+    # production) or "api" (the colleague's Patient Intelligence API, while
+    # the database is suspended). See app/source.py.
+    clinic_source: str = os.environ.get("CLINIC_SOURCE", "db").strip().lower()
+    patient_api_url: str = os.environ.get("PATIENT_API_URL", "").strip().strip('"').rstrip("/")
+    patient_api_key: str = os.environ.get("PATIENT_API_KEY", "").strip().strip('"')
     cors_origins: list[str] = field(
         default_factory=lambda: _list("CORS_ORIGINS", "http://localhost:5175,http://127.0.0.1:5175"))
 

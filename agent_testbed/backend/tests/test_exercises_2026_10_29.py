@@ -11,7 +11,7 @@ NEW = ["calf_raise", "seated_knee_extension", "single_leg_stand", "heel_toe_walk
        "seated_march", "chair_hamstring_stretch", "chin_tuck"]
 DISC = ["herniated_disk", "degenerative_disc", "spinal_stenosis"]
 RERANKED = {"bp_controlled", "diabetes_controlled", "prediabetes", "obesity", "arthritis_knee", "arthritis_hip",
-            "spondylosis"}
+            "spondylosis", "asthma_controlled"}  # asthma ranked from scratch 2026-10-30 (test_asthma.py)
 NORMAL = {"bp": {"sys": 125.0, "dia": 80.0, "date": "2026-10-20"}}
 
 
@@ -44,7 +44,7 @@ def test_every_condition_ranks_each_exercise_once(db):
     for r in db.scalars(select(SafetyRule)):
         ranks.setdefault(r.condition_code, []).append(r.usefulness_rank)
     for code in RERANKED - {"bp_controlled"}:
-        assert sorted(ranks[code]) == list(range(1, 26)), code
+        assert sorted(ranks[code]) == list(range(1, 28)), code  # 27 exercises since 2026-10-30
 
 
 def test_reranked_conditions_put_the_research_backed_exercises_first(db):

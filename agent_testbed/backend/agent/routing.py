@@ -17,8 +17,11 @@ _BP_FLAG = re.compile(r"^BP_(SYS|DIA)_(HIGH|CRITICAL)$")
 _SUGAR_FLAG = re.compile(r"SUGAR_MG_DL_(HIGH|CRITICAL)$")
 _BP_KEYS = ("bp", "bp_sys", "bp_dia")
 _SUGAR_KEYS = ("sugar_mg_dl", "fasting_sugar_mg_dl", "nonfasting_sugar_mg_dl")
-# The AI reports BP and sugar as "controlled" by default; the vital flags decide.
-_TO_MARKER = {"bp_controlled": "bp_any", "diabetes_controlled": "diabetes_any"}
+# The AI reports BP, sugar and asthma as "controlled" by default; the rules decide.
+_TO_MARKER = {"bp_controlled": "bp_any", "diabetes_controlled": "diabetes_any", "asthma_controlled": "asthma_any"}
+# Asthma not under control (research/ASTHMA.md, Part B point 4). No medicines.
+_ASTHMA_COMPLAINTS = {"Breathlessness", "Wheeze"}  # warning-complaint labels, last 6 months
+ASTHMA_SPO2_BELOW = 94
 
 
 def _uncontrolled(visits: list[dict], flags: list[dict], flag: re.Pattern, keys: tuple, what: str) -> tuple[bool, str]:
@@ -55,6 +58,40 @@ def _resolve_markers(findings: list[Finding], context: dict) -> list[tuple[str, 
     return notes
 
 
+def _latest_spo2(visits: list[dict]) -> tuple[float, str] | None:
+    """The newest plausible SpO2 (50–100%) in the recent visits, with its date."""
+    for v in visits:
+        try:
+            value = float(str(v.get("vitals", {}).get("spo2", "")).rstrip("%").strip())
+        except ValueError:
+            continue
+        if 50 <= value <= 100:
+            return value, str(v["date"])
+    return None
+
+
+def _resolve_asthma(findings: list[Finding], context: dict, rules: RuleResult) -> list[tuple[str, str]]:
+    """asthma_any -> asthma_controlled or asthma_uncontrolled. Not under
+    control with breathlessness or wheeze in a complaint in the last 6 months,
+    an emergency visit, or a latest SpO2 below 94%. Returns (code, evidence line)."""
+    if not any(f.code in ("asthma_any", "asthma_controlled", "asthma_uncontrolled") for f in findings):
+        return []
+    why = [f"{w['label'].lower()} in the complaint on {w['date']}" for w in rules.warnings
+           if w["label"] in _ASTHMA_COMPLAINTS]
+    why += [f"emergency visit on {e['date']}" for e in context["alerts"]["emergencies"]]
+    spo2 = _latest_spo2(context["visits"])
+    if spo2 and spo2[0] < ASTHMA_SPO2_BELOW:
+        why.append(f"SpO2 {spo2[0]:g}% on {spo2[1]}")
+    code = "asthma_uncontrolled" if why else "asthma_controlled"
+    for f in findings:
+        if f.code == "asthma_any":
+            f.code = code
+    if why:
+        return [(code, "not under control: " + "; ".join(dict.fromkeys(why)))]
+    return [(code, "no breathlessness or wheeze in the last 6 months, no emergency visit, "
+                   + (f"SpO2 {spo2[0]:g}% on {spo2[1]}" if spo2 else "no SpO2 reading"))]
+
+
 def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
              ai_findings: list[Finding]) -> dict:
     findings = [*rules.findings, *ai_findings]
@@ -62,11 +99,16 @@ def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
         f.code = _TO_MARKER.get(f.code, f.code)
     # A clinic condition we can't map: a doctor decides.
     findings += [Finding("other_unlisted", "rules", u, u) for u in rules.unmapped]
-    flag_notes = _resolve_markers(findings, context)
+    flag_notes = _resolve_markers(findings, context) + _resolve_asthma(findings, context, rules)
 
     # The stricter reading wins: "controlled" evidence joins the uncontrolled
     # code, so the doctor still sees it (and the flags note below says why).
     codes = {f.code for f in findings}
+    if "asthma_uncontrolled" in codes:
+        for f in findings:
+            if f.code == "asthma_controlled":
+                f.code = "asthma_uncontrolled"
+        flag_notes = [(c, n) for c, n in flag_notes if c != "asthma_controlled"]
     for strict, mild, flag_kind in (("high_bp", "bp_controlled", "BP"), ("diabetes", "diabetes_controlled", "sugar")):
         if strict in codes:
             for f in findings:

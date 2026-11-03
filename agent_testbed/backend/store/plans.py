@@ -42,6 +42,10 @@ DEFAULT_EXPERIENCE = "beginner"
 OLDER_AGE = 60         # at or above: high-impact and floor exercises left out, doses one step lower
 HIGH_BMI = 30.0        # at or above: high-impact and floor exercises left out (Exercise.impact, Exercise.position)
 MAX_EXERCISES = 5      # in any draft the agent makes
+# Walking is the core of the plan for BP, diabetes and asthma (research/*.md):
+# the first of these the patient is allowed always leads a draft, and the
+# others are left out (they repeat it). Marching is walking indoors.
+CORE_AEROBIC = ("walk", "march_in_place", "seated_march")
 
 # Which reading counts (decided 2026-10-28): the latest, if within this many
 # days. A patient with BP and no recent BP reading is treated as 140/90; for
@@ -211,7 +215,22 @@ def starter_exercises(db: Session, codes: list[str], age: int | None, bmi: float
     that changed it."""
     allowed, rules = candidates(db, codes, age, bmi, readings)
     count = EXERCISES_BY_EXPERIENCE.get(experience, EXERCISES_BY_EXPERIENCE["beginner"])
-    return [plan_entry(e) for e in allowed[:count]], rules
+    return [plan_entry(e) for e in core_first(allowed, allowed, count)], rules
+
+
+def core_exercise(allowed: list[dict]) -> dict | None:
+    """The walking-type exercise every draft starts with: the first of
+    CORE_AEROBIC the patient is allowed, or None."""
+    return next((e for kind in CORE_AEROBIC for e in allowed if e["activity_type"] == kind), None)
+
+
+def core_first(allowed: list[dict], picks: list[dict], limit: int) -> list[dict]:
+    """The picks with the core exercise first and the other walking-type ones
+    left out, at most `limit`."""
+    core = core_exercise(allowed)
+    if core is None:
+        return picks[:limit]
+    return [core, *(p for p in picks if p["activity_type"] not in CORE_AEROBIC)][:limit]
 
 
 def violations(db: Session, exercises: list[dict], codes: list[str],

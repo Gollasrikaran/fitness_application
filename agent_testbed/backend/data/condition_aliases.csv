@@ -9,8 +9,8 @@ long_term_condition,Depression,depression,
 long_term_condition,Anxiety Disorder,anxiety,
 long_term_condition,Hypothyroidism,other_unlisted,no exercise rules of ours: doctor decides
 long_term_condition,Hyperthyroidism,other_unlisted,no exercise rules of ours: doctor decides
-long_term_condition,Asthma,other_unlisted,no exercise rules of ours: doctor decides
-long_term_condition,COPD,other_unlisted,no exercise rules of ours: doctor decides
+long_term_condition,Asthma,asthma_any,"controlled or not is decided by the rules (complaints, emergency visits, SpO2)"
+long_term_condition,COPD,copd,
 long_term_condition,Chronic Anaemia,other_unlisted,no exercise rules of ours: doctor decides
 long_term_condition,Osteoarthritis,other_unlisted,joint not recorded: doctor decides
 long_term_condition,Rheumatoid Arthritis,other_unlisted,no exercise rules of ours: doctor decides
@@ -25,7 +25,7 @@ health_history,diabetes,diabetes_any,
 health_history,heart_disease,heart_condition,
 health_history,high_cholesterol,high_cholesterol,
 health_history,thyroid,other_unlisted,no exercise rules of ours: doctor decides
-health_history,asthma,other_unlisted,no exercise rules of ours: doctor decides
+health_history,asthma,asthma_any,"controlled or not is decided by the rules (complaints, emergency visits, SpO2)"
 health_history,tuberculosis,other_unlisted,serious illness: doctor decides
 text,htn,bp_any,
 text,hypertension,bp_any,
@@ -117,8 +117,8 @@ text,depression,depression,
 text,anxiety,anxiety,
 text,hypothyroidism,other_unlisted,no exercise rules of ours: doctor decides
 text,hyperthyroidism,other_unlisted,no exercise rules of ours: doctor decides
-text,asthma,other_unlisted,no exercise rules of ours: doctor decides
-text,copd,other_unlisted,no exercise rules of ours: doctor decides
+text,asthma,asthma_any,"controlled or not is decided by the rules (complaints, emergency visits, SpO2)"
+text,copd,copd,
 text,shoulder pain,other_unlisted,no shoulder exercises yet: doctor decides
 text,frozen shoulder,other_unlisted,no shoulder exercises yet: doctor decides
 text,shoulder impingement,other_unlisted,no shoulder exercises yet: doctor decides
@@ -132,3 +132,10 @@ text,polyarthralgia,other_unlisted,joint not named: doctor decides
 text,arthralgia,other_unlisted,joint not named: doctor decides
 text,rheumatoid,other_unlisted,no exercise rules of ours: doctor decides
 text,vertigo,other_unlisted,dizziness: doctor decides
+text,hyperreactive airway,asthma_any,"controlled or not is decided by the rules (complaints, emergency visits, SpO2)"
+text,reactive airway,asthma_any,"controlled or not is decided by the rules (complaints, emergency visits, SpO2)"
+text,allergic bronchitis,asthma_any,"controlled or not is decided by the rules (complaints, emergency visits, SpO2)"
+text,coad,copd,
+text,chronic bronchitis,copd,
+text,emphysema,copd,
+text,chronic obstructive,copd,

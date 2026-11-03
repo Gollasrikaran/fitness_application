@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage, SystemMessage
 from agent.conditions import load_reference, rule_findings
 from agent.llm import chat_model
 from agent.prompts import DOCTOR_CHAT, record_block
-from app import clinic
+from app.source import clinic
 from store import assessments as assessment_store
 from store import cases as case_store
 from store import plans as plan_store

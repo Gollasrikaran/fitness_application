@@ -23,8 +23,8 @@ from sqlalchemy import delete, select
 
 from agent.assess import run_assessment
 from agent.conditions import load_reference, rule_findings
-from agent.draft import build_draft
-from app import clinic
+from agent.draft import build_draft, patient_profile
+from app.source import USING_API, clinic
 from app.db import pool
 from store import plans as plan_store
 from store.db import session
@@ -53,7 +53,7 @@ def run_one(patient_id: str) -> dict:
         ref = load_reference(db)
     rules = rule_findings(context, ref)
     assessment = run_assessment(patient_id, DRY_RUN_DOCTOR, context=context)
-    patient = {"age": context["patient"]["age"], "sex": context["patient"]["sex"], "bmi": context["body"]["bmi"]}
+    patient = patient_profile(context)
     with session() as db:
         draft = build_draft(db, patient_id, assessment, patient)
         draft_out = {"id": draft.id, "source": draft.source, "kind": draft.kind, "reason": draft.reason,
@@ -73,9 +73,11 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 
-    pool.open()
+    if not USING_API:
+        pool.open()
     init_store()
-    pool_ids = [p["id"] for p in clinic.patients(None, "", limit=500, min_visits=2)]
+    # Through the API every patient in the pool costs one call: a smaller pool.
+    pool_ids = [p["id"] for p in clinic.patients(None, "", limit=150 if USING_API else 500, min_visits=2)]
     with session() as db:
         busy = set(db.scalars(select(Plan.patient_id))) | set(
             db.scalars(select(PlanProposal.patient_id).where(PlanProposal.status == "pending")))
@@ -95,7 +97,8 @@ def main() -> None:
     print(f"deleted {n} dry-run drafts; assessments kept (doctor_id={DRY_RUN_DOCTOR})")
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=1, default=str, ensure_ascii=False)
-    pool.close()
+    if not USING_API:
+        pool.close()
 
 
 def _safe(patient_id: str) -> dict:

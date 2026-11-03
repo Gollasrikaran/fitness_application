@@ -14,9 +14,10 @@ from pydantic import BaseModel, Field
 
 from agent.draft import generate_plan
 from agent.main import AgentUnavailable, close_memory, open_memory, run_turn, thread_id
-from app import clinic
+from app import patient_api
 from app.config import settings
 from app.db import fetch_one, pool
+from app.source import USING_API, clinic
 from store import assessments as assessment_store
 from store import cases as case_store
 from store import messages as message_store
@@ -30,12 +31,14 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    pool.open()
+    if not USING_API:  # patient records from the clinic database (production)
+        pool.open()
     init_store()  # the agent's own tables in the temporary database
     open_memory()  # the agent's conversation memory, also in the temporary database
     yield
     close_memory()
-    pool.close(timeout=1)  # don't let a slow pooler hold up --reload
+    if not USING_API:
+        pool.close(timeout=1)  # don't let a slow pooler hold up --reload
 
 
 app = FastAPI(title="Agent testbed", version="0.1.0", lifespan=lifespan)
@@ -47,7 +50,10 @@ app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "clinic_db": fetch_one("SELECT current_setting('transaction_read_only') AS ro")}
+    if USING_API:
+        return {"status": "ok", "source": "api", "patient_api": "up" if patient_api.health() else "down"}
+    return {"status": "ok", "source": "db",
+            "clinic_db": fetch_one("SELECT current_setting('transaction_read_only') AS ro")}
 
 
 @app.get("/doctors")
@@ -59,6 +65,12 @@ def list_doctors():
 def list_patients(doctor_id: str | None = None, search: str = "",
                   limit: int = Query(100, ge=1, le=500), min_visits: int = Query(2, ge=1, le=50)):
     return clinic.patients(doctor_id, search, limit, min_visits)
+
+
+@app.get("/patients/{patient_id}/doctors")
+def patient_doctors(patient_id: str):
+    """The doctors who saw this patient, so a doctor can be picked after the patient."""
+    return clinic.patient_doctors(patient_id)
 
 
 @app.get("/patients/{patient_id}/context")

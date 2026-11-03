@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from agent.assess import run_assessment
 from agent.llm import chat_model
 from agent.prompts import DRAFT
-from app import clinic
+from app.source import clinic
 from store import plans as plan_store
 from store.db import session
 from store.models import PlanProposal
@@ -51,8 +51,14 @@ class AIDraft(BaseModel):
 def _ask_ai(assessment: dict, patient: dict, allowed: list[dict]) -> AIDraft:
     lines = "\n".join(f"- {e['activity_type']}: {e['name']}, {e['sets']} x {e['amount']:g} {e['unit']}"
                       + (f" (CAUTION: {e['notes']})" if e["notes"] else "") for e in allowed)
-    high = min(plan_store.MAX_EXERCISES, len(allowed))
-    prompt = DRAFT.format(allowed=lines, low=min(MIN_EXERCISES, high), high=high)
+    core = plan_store.core_exercise(allowed)
+    others = [e for e in allowed if e["activity_type"] not in plan_store.CORE_AEROBIC] if core else allowed
+    high = min(plan_store.MAX_EXERCISES - bool(core), len(others))
+    low = min(MIN_EXERCISES - bool(core), high)
+    core_line = (f"\nCORE: {core['activity_type']} ({core['name']}) is the main exercise of the plan; the rules put it "
+                 f"first themselves. Don't return it or any other of {', '.join(plan_store.CORE_AEROBIC)}.\n"
+                 if core else "")
+    prompt = DRAFT.format(allowed=lines, core=core_line, low=low, high=high)
     about = {**patient, "problem": assessment["problem"], "body_area": assessment["body_area"],
              "conditions": [{"code": c["code"], "name": c["name"]} for c in assessment["conditions"]],
              "concerns": assessment["concerns"]}
@@ -79,7 +85,21 @@ def _from_ai(answer: AIDraft, allowed: list[dict]) -> tuple[list[dict], list[str
         problems.append("no exercises picked")
     if not answer.instructions.strip():
         problems.append("no instructions for the patient")
-    return exercises, whys, problems
+    return (*_core_first(exercises, whys, allowed), problems)
+
+
+CORE_WHY = "the main everyday exercise of the plan (always first, set by the safety rules)."
+
+
+def _core_first(exercises: list[dict], whys: list[str], allowed: list[dict]) -> tuple[list[dict], list[str]]:
+    """Walking first in every AI draft, whatever the AI picked (plan_store.core_first).
+    Too many picks stay as they are, so the rules check rejects them."""
+    if not exercises or len(exercises) > plan_store.MAX_EXERCISES:
+        return exercises, whys
+    why = dict(zip((x["activity_type"] for x in exercises), whys))
+    kept = plan_store.core_first(allowed, exercises, plan_store.MAX_EXERCISES)
+    return ([plan_store.plan_entry(x) for x in kept],
+            [why.get(x["activity_type"], f"- {x['name']}: {CORE_WHY}") for x in kept])
 
 
 def build_draft(db: Session, patient_id: str, assessment: dict, patient: dict,
@@ -93,6 +113,8 @@ def build_draft(db: Session, patient_id: str, assessment: dict, patient: dict,
     plan_store.pending_superseded(db, patient_id)
 
     def save(source: str, exercises: list[dict], instructions: str, reason: str) -> PlanProposal:
+        if patient.get("eligibility_note"):  # information for the doctor only: it never changes the draft
+            reason = f"{patient['eligibility_note']}\n{reason}"
         proposal = PlanProposal(
             patient_id=patient_id, assessment_id=assessment["id"], kind="update" if current else "starter",
             source=source, instructions=instructions, exercises=exercises, reason=reason, conditions=codes,
@@ -142,6 +164,23 @@ def assessment_age(patient: dict) -> int | None:
     return patient.get("age")
 
 
+def eligibility_note(context: dict) -> str | None:
+    """The "can exercise" screening (Patient Intelligence API), when it says
+    no: a warning line for the doctor. It never withholds the draft; the
+    doctor decides (decided 2026-11-03). The clinic DB source has no such check."""
+    summary = context.get("clinical_summary") or {}
+    if summary.get("exercise_suitable") is not False:
+        return None
+    return (f"Warning: the exercise screening marks this patient not suitable for exercise "
+            f"(main type: {summary.get('patient_type') or 'not given'}). Please check before approving.")
+
+
+def patient_profile(context: dict) -> dict:
+    """What the draft needs about the patient: {age, sex, bmi, eligibility_note}."""
+    return {"age": context["patient"]["age"], "sex": context["patient"]["sex"], "bmi": context["body"]["bmi"],
+            "eligibility_note": eligibility_note(context)}
+
+
 def generate_plan(patient_id: str, doctor_id: str) -> dict:
     """The doctor's "Generate plan": assess the patient, then draft. Returns
     {"assessment", "draft"}; the draft waits for the doctor's review."""
@@ -149,7 +188,6 @@ def generate_plan(patient_id: str, doctor_id: str) -> dict:
     if context is None:
         raise ValueError("Patient not found")
     assessment = run_assessment(patient_id, doctor_id, context=context)
-    patient = {"age": context["patient"]["age"], "sex": context["patient"]["sex"], "bmi": context["body"]["bmi"]}
     with session() as db:
-        draft = build_draft(db, patient_id, assessment, patient)
+        draft = build_draft(db, patient_id, assessment, patient_profile(context))
         return {"assessment": assessment, "draft": plan_store.proposal_dict(draft, full=True)}

@@ -131,3 +131,46 @@ def test_no_draft_ever_breaks_the_rules(db):
             assert e["amount"] <= maxima[e["activity_type"]].max_amount
         if any(db.get(Condition, c).bucket == "refer" for c in combo):
             assert p.source == "doctor" and p.exercises == []
+
+
+# ── Walking leads every draft (research/*.md: walking is the core) ──────────
+
+def test_walking_leads_an_ai_draft_even_when_the_ai_leaves_it_out(db):
+    # The 2026-11-03 case: the AI swapped walking for marching on the spot.
+    p = build_draft(db, "p1", assessment(["bp_controlled"]), PATIENT,
+                    ask_ai=ai_picking("slow_breathing", "march_in_place", "seated_knee_extension", "calf_stretch",
+                                      "shoulder_circles"))
+    kinds = [e["activity_type"] for e in p.exercises]
+    assert p.source == "ai" and kinds == ["walk", "slow_breathing", "seated_knee_extension", "calf_stretch",
+                                          "shoulder_circles"]
+    assert "Walking: the main everyday exercise" in p.reason
+
+
+def test_walking_is_not_repeated_when_the_ai_already_picked_it(db):
+    p = build_draft(db, "p1", assessment(["bp_controlled"]), PATIENT,
+                    ask_ai=ai_picking("sit_to_stand", "walk", "slow_breathing"))
+    assert [e["activity_type"] for e in p.exercises] == ["walk", "sit_to_stand", "slow_breathing"]
+    assert "Walking: helps" in p.reason  # the AI's own line is kept
+
+
+def test_the_rules_draft_starts_with_walking_too(db):
+    for code in ("bp_controlled", "diabetes_controlled", "asthma_controlled", "none"):
+        exercises, _ = plans.starter_exercises(db, [code], PATIENT["age"], PATIENT["bmi"])
+        assert exercises[0]["activity_type"] == "walk", code
+        assert not {"march_in_place", "seated_march"} & {e["activity_type"] for e in exercises}, code
+
+
+def test_breathlessness_in_everyday_words_is_a_warning(db):
+    """Any patient, any condition: these send the plan to a doctor (the
+    2026-11-03 case said "breathing problem while walking")."""
+    from agent.conditions import load_reference, rule_findings
+    from store.models import WarningComplaint
+    from store.seed import _rows
+    ref = load_reference(db)
+    ref.warnings = [WarningComplaint(phrase=r["phrase"].strip().lower(), label=r["label"])
+                    for r in _rows("warning_complaints.csv")]
+    for complaint in ("Frequent urination, breathing problem while walking", "SOB on exertion",
+                      "short of breath climbing stairs", "difficulty breathing at night"):
+        ctx = {"conditions": {"doctor_recorded": [], "long_term_conditions": [], "health_history": []},
+               "body": {}, "visits": [{"date": plans.date.today().isoformat(), "complaint": complaint}]}
+        assert {w["label"] for w in rule_findings(ctx, ref).warnings} == {"Breathlessness"}, complaint
