@@ -149,7 +149,8 @@ def parse_lab(line: str) -> dict | None:
 
 
 def parse_timeline(text: str) -> list[dict]:
-    """/timeline text -> one entry per visit, newest first:
+    """/timeline text -> one entry per visit, in the text's order (not always
+    newest first: build_context sorts them):
     {"date", "visit_id", "complaint", "provisional", "confirmed", "instructions", "labs"}.
     A date can hold several visits ("Visit A of 2"); each starts at its VISIT ID.
     A field can run over several unindented lines ("DUB\\nPerimenopause"):
@@ -207,20 +208,24 @@ def build_context(summary: dict, timeline: str, doctor_names: dict[str, str] | N
     names = doctor_names or {}
     by_visit = vitals_by_visit(summary)
     meta = {v["visit_id"]: v for v in summary.get("visits") or []}
-    entries = parse_timeline(timeline)[:RECENT_VISITS]
+    # Newest first, whatever order the timeline lists them in (some list the
+    # oldest first); visits on the same date keep the timeline's order.
+    entries = sorted(parse_timeline(timeline), key=lambda e: e["date"], reverse=True)[:RECENT_VISITS]
     for e in entries:  # lab results count as readings, as the clinic DB's vitals do
         readings = lab_readings(e.get("labs") or [])
         if readings:
             vitals = by_visit.setdefault(e.get("visit_id"), {"date": e["date"]})
             for k, v in readings.items():
-                vitals.setdefault(k, v)
+                if k not in vitals:  # a reading taken at the visit wins
+                    vitals[k] = v
+                    vitals.setdefault("from_lab", []).append(k)  # counts for longer (store.plans)
     if not entries:  # no timeline: the visits from /summary, without complaints or diagnoses
         entries = [{"date": v["visit_date"], "visit_id": v["visit_id"]} for v in summary.get("visits") or []]
 
     visits = []
     for e in entries:
         m = meta.get(e.get("visit_id"), {})
-        vitals = {k: v for k, v in by_visit.get(e.get("visit_id"), {}).items() if k != "date"}
+        vitals = {k: v for k, v in by_visit.get(e.get("visit_id"), {}).items() if k not in ("date", "from_lab")}
         visit = {"date": e["date"], "doctor": names.get(m.get("doctor_id")), "complaint": e.get("complaint"),
                  "vitals": vitals, "diagnosis_provisional": e.get("provisional"),
                  "diagnosis_confirmed": e.get("confirmed"), "patient_instructions": e.get("instructions"),

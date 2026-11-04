@@ -181,13 +181,14 @@ def patient_profile(context: dict) -> dict:
             "eligibility_note": eligibility_note(context)}
 
 
-def generate_plan(patient_id: str, doctor_id: str) -> dict:
+def generate_plan(patient_id: str, doctor_id: str, reading_days: int = plan_store.READING_DAYS) -> dict:
     """The doctor's "Generate plan": assess the patient, then draft. Returns
-    {"assessment", "draft"}; the draft waits for the doctor's review."""
+    {"assessment", "draft"}; the draft waits for the doctor's review.
+    `reading_days`: how far back readings count (the doctor's choice)."""
     context = clinic.patient_context(patient_id)
     if context is None:
         raise ValueError("Patient not found")
-    assessment = run_assessment(patient_id, doctor_id, context=context)
+    assessment = run_assessment(patient_id, doctor_id, context=context, reading_days=reading_days)
     with session() as db:
         draft = build_draft(db, patient_id, assessment, patient_profile(context))
         return {"assessment": assessment, "draft": plan_store.proposal_dict(draft, full=True)}

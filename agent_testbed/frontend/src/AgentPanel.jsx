@@ -9,11 +9,20 @@ import { api } from "./api.js";
 const KIND = { starter: "First plan", update: "Update to current plan" };
 const SOURCE = { ai: "AI draft", rules: "Rules draft", doctor: "Doctor must write" };
 const dose = (d) => (d ? `${d.sets} × ${d.amount}` : "—");
+// How far back readings count for "Generate plan". Older readings can only make
+// the plan stricter (an old BP counts only if high); lab results always count
+// for 6 months.
+const READING_DAYS = [
+  [90, "last 90 days"],
+  [180, "last 6 months"],
+  [365, "last year"],
+];
 
 export default function AgentPanel({ patientId, doctor, doctors, version, onChanged }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [readingDays, setReadingDays] = useState(90);
 
   useEffect(() => {
     setError("");
@@ -27,7 +36,7 @@ export default function AgentPanel({ patientId, doctor, doctors, version, onChan
     setBusy(true);
     setError("");
     try {
-      await api("POST", `/patients/${patientId}/assess`, { doctor_id: doctor.id });
+      await api("POST", `/patients/${patientId}/assess`, { doctor_id: doctor.id, reading_days: readingDays });
       onChanged();
     } catch (e) {
       setError(e.message);
@@ -44,6 +53,16 @@ export default function AgentPanel({ patientId, doctor, doctors, version, onChan
     <>
       <div className="card row-between">
         <span className="small muted">{busy ? "Assessing the record and drafting… (about 20 s)" : "Exercise plan"}</span>
+        <label className="small inline" title="Older readings can only make the plan stricter. Lab results always count for 6 months.">
+          Readings from{" "}
+          <select value={readingDays} onChange={(e) => setReadingDays(Number(e.target.value))} disabled={busy}>
+            {READING_DAYS.map(([days, label]) => (
+              <option key={days} value={days}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
         <button className="primary" onClick={generate} disabled={busy}>
           {busy ? "Working…" : pending ? "Generate again" : "Generate plan"}
         </button>
@@ -75,8 +94,8 @@ export default function AgentPanel({ patientId, doctor, doctors, version, onChan
   );
 }
 
-// The latest readings the reading rules tested (last 90 days), e.g.
-// "BP 150/95 (2026-10-20) · Sugar 260 mg/dL (2026-10-20) · no Hb, SpO2, pulse".
+// The latest readings the reading rules tested, e.g. "BP 150/95 (2026-10-20) ·
+// Hb 6 g/dL (2026-06-06, older reading) · none in the last 90 days for Sugar".
 const READING = {
   bp: ["BP", (r) => `${r.sys}/${r.dia}`],
   sugar: ["Sugar", (r) => `${r.low === r.high ? r.high : `${r.low}–${r.high}`} mg/dL`],
@@ -86,9 +105,13 @@ const READING = {
 };
 function readingsText(readings) {
   const known = Object.keys(READING).filter((k) => k in readings);
-  const seen = known.filter((k) => readings[k]).map((k) => `${READING[k][0]} ${READING[k][1](readings[k])} (${readings[k].date})`);
+  const seen = known
+    .filter((k) => readings[k])
+    .map((k) => `${READING[k][0]} ${READING[k][1](readings[k])} (${readings[k].date}${readings[k].older ? ", older reading" : ""})`);
   const none = known.filter((k) => !readings[k]).map((k) => READING[k][0]);
-  return [...seen, none.length && `none in the last 90 days for ${none.join(", ")}`].filter(Boolean).join(" · ");
+  const window = (READING_DAYS.find(([d]) => d === readings.days) || READING_DAYS[0])[1];
+  const extra = readings.days > 90 ? ` (older readings included by the doctor: ${window})` : "";
+  return [...seen, none.length && `none in the ${window} for ${none.join(", ")}`].filter(Boolean).join(" · ") + extra;
 }
 
 function AssessmentView({ a }) {

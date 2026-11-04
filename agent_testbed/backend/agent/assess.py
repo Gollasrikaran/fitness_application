@@ -113,7 +113,8 @@ def _check(ai: AIAssessment, ref, record: dict) -> tuple[list[Finding], list[dic
 
 
 def run_assessment(patient_id: str, doctor_id: str, today: date | None = None,
-                   context: dict | None = None) -> dict:
+                   context: dict | None = None, reading_days: int = plan_store.READING_DAYS) -> dict:
+    """`reading_days` above the default: the doctor included older readings."""
     today = today or date.today()
     context = context or clinic.patient_context(patient_id)
     if context is None:
@@ -140,7 +141,8 @@ def run_assessment(patient_id: str, doctor_id: str, today: date | None = None,
             concerns=[*(ai or {}).get("concerns", []), *unlisted], missing=(ai or {}).get("missing", []),
             unmapped=rules.unmapped, warnings=rules.warnings, ai_status="ok" if ai else "failed",
             ai_output=ai, dropped=dropped, model=MODEL,
-            readings=plan_store.latest_readings(context["vitals_recent"], today))
+            readings={**plan_store.latest_readings(context["vitals_recent"], today, reading_days),
+                      "days": reading_days})
         db.add(saved)
         db.flush()
         return assessment_store.assessment_dict(saved, full=True)

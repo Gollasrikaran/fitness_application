@@ -237,3 +237,48 @@ def test_bad_conditions_are_refused(when, metric):
     from store.seed import parse_when
     with pytest.raises(ValueError):
         parse_when(when, metric)
+
+
+# ── Older readings (decided 2026-11-04): lab results count for 6 months; the
+# doctor may include older readings, which can only make the plan stricter ──
+
+def test_a_lab_result_counts_for_six_months_a_vital_for_ninety_days():
+    vitals = [{"date": date(2026, 6, 1), "hb": 6.0, "pulse": 80, "from_lab": ["hb"]}]  # 149 days old
+    out = plans.latest_readings(vitals, TODAY)
+    assert out["hb"] == {"value": 6.0, "date": "2026-06-01", "older": True} and out["pulse"] is None
+    assert plans.latest_readings(vitals, date(2026, 12, 15))["hb"] is None  # 197 days: too old
+
+
+def test_the_doctor_can_include_older_readings():
+    vitals = [{"date": date(2026, 6, 1), "pulse": 110, "spo2": 91}]
+    assert plans.latest_readings(vitals, TODAY)["pulse"] is None
+    out = plans.latest_readings(vitals, TODAY, days=180)
+    assert out["pulse"] == {"value": 110.0, "date": "2026-06-01", "older": True}
+    assert out["spo2"]["value"] == 91.0
+    assert plans.latest_readings(vitals, TODAY, days=365)["pulse"]["value"] == 110.0
+
+
+def test_an_older_bp_counts_only_if_high():
+    """A normal old BP must not replace the assumed 140/90 of a BP patient."""
+    normal = [{"date": date(2026, 6, 1), "bp": "118/75"}]
+    high = [{"date": date(2026, 6, 1), "bp": "165/100"}]
+    assert plans.latest_readings(normal, TODAY, days=365)["bp"] is None
+    assert plans.latest_readings(high, TODAY, days=365)["bp"] == {"sys": 165.0, "dia": 100.0, "date": "2026-06-01",
+                                                                  "older": True}
+    assert plans.latest_readings(high, TODAY)["bp"] is None  # the default window: too old
+
+
+def test_a_newer_reading_wins_over_an_older_one():
+    vitals = [{"date": date(2026, 10, 20), "hb": 12.5}, {"date": date(2026, 6, 1), "hb": 6.0, "from_lab": ["hb"]}]
+    assert plans.latest_readings(vitals, TODAY, days=365)["hb"] == one(12.5)
+
+
+def test_including_older_readings_never_allows_more(db):
+    """Readings only ever rule exercises out, so a longer window can't add any."""
+    vitals = [{"date": date(2026, 10, 1), "spo2": 97},
+              {"date": date(2026, 5, 1), "bp": "120/80", "pulse": 112, "hb": 7.5}]
+    for codes in (("bp_controlled",), ("none",), ("asthma_controlled",)):
+        default, _ = allowed_with(db, plans.latest_readings(vitals, TODAY), codes)
+        for days in plans.READING_DAY_CHOICES:
+            kinds, _ = allowed_with(db, plans.latest_readings(vitals, TODAY, days), codes)
+            assert kinds <= default, (codes, days)

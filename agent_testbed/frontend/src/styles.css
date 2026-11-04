@@ -20,6 +20,7 @@ p { margin: 6px 0; }
 input, select, textarea, button { font: inherit; }
 input, select, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+label.inline { flex-direction: row; align-items: center; gap: 6px; margin-left: auto; margin-right: 8px; }
 fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0; }
 legend { font-size: 13px; color: var(--muted); padding: 0 4px; }
 table { border-collapse: collapse; width: 100%; font-size: 14px; }

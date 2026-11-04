@@ -400,9 +400,20 @@ function ContextPanel({ patientId }) {
           </Row>
         ))}
       </Section>
-      {medicines.patient_instructions && (
-        <Section title="Doctor's latest instructions">
-          <p className="small pre">{medicines.patient_instructions}</p>
+      {ctx.visits.some((v) => v.patient_instructions) && (
+        <Section title="Doctor's notes by visit">
+          {ctx.visits
+            .filter((v) => v.patient_instructions)
+            .map((v, i) => (
+              <Row key={i}>
+                <span className="muted">
+                  {v.date}
+                  {v.doctor ? ` · Dr. ${v.doctor}` : ""}
+                  {i === 0 ? " · latest" : ""}
+                </span>
+                <div className="pre">{v.patient_instructions}</div>
+              </Row>
+            ))}
         </Section>
       )}
 

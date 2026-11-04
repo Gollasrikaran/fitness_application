@@ -160,6 +160,9 @@ def test_low_hb_from_a_lab_report_reaches_the_reading_rules():
                                "status": "Critical (Low)"}
     assert plans.latest_readings(ctx["vitals_recent"], date(2026, 7, 1))["hb"] == {"value": 6.0,
                                                                                     "date": "2026-06-06"}
+    # The real case was checked 150 days later: a lab result still counts (6 months).
+    assert plans.latest_readings(ctx["vitals_recent"], date(2026, 11, 3))["hb"]["value"] == 6.0
+    assert plans.latest_readings(ctx["vitals_recent"], date(2026, 11, 3))["pulse"] is None  # a vital: 90 days
 
 
 # ── The record ──────────────────────────────────────────────────────────────
@@ -302,3 +305,27 @@ def test_patient_context_through_the_api(fake_api):
     assert ctx["visits"][0]["doctor"] == "Asha Rao"
     assert clinic_api.patient_context("kid") is None  # adults only
     assert clinic_api.patient_context("unknown") is None
+
+
+def test_visits_are_newest_first_even_when_the_timeline_lists_the_oldest_first():
+    """The 2026-11-04 case: the timeline listed 2026-09-15 before 2026-09-21,
+    so the older visit's note showed as the doctor's latest instructions."""
+    timeline = """DATE: 2026-09-15
+  VISIT ID: v1
+  Chief Complaint (database): breathing problem while walking
+  Prescription Instructions (database): Old case of HT, DM
+DATE: 2026-09-21
+  VISIT ID: v2
+  Chief Complaint (database): Follow up
+  Prescription Instructions (database): Investigation --normal, BP --118/75
+"""
+    summary = {"patient_id": "p8", "age_years": 65, "sex": "FEMALE",
+               "visits": [{"visit_id": "v1", "visit_date": "2026-09-15", "doctor_id": "d1"},
+                          {"visit_id": "v2", "visit_date": "2026-09-21", "doctor_id": "d1"}],
+               "vitals": [{"visit_id": "v1", "visit_date": "2026-09-15", "readings": [{"label": "BP", "value": "123/80"}]},
+                          {"visit_id": "v2", "visit_date": "2026-09-21", "readings": [{"label": "BP", "value": "118/75"}]}]}
+    ctx = clinic_api.build_context(summary, timeline, {}, TODAY)
+    assert [v["date"] for v in ctx["visits"]] == ["2026-09-21", "2026-09-15"]
+    assert ctx["medicines"]["from"] == "2026-09-21"
+    assert ctx["medicines"]["patient_instructions"] == "Investigation --normal, BP --118/75"
+    assert ctx["care"]["recent_complaints"][0]["date"] == "2026-09-21"

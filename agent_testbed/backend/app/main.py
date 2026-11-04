@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -109,6 +110,8 @@ def chat_history(patient_id: str, doctor_id: str):
 
 class AssessIn(BaseModel):
     doctor_id: str = Field(min_length=1)
+    # How far back readings count: the default, or older ones the doctor includes.
+    reading_days: Literal[plan_store.READING_DAY_CHOICES] = plan_store.READING_DAYS
 
 
 @app.post("/patients/{patient_id}/assess")
@@ -117,7 +120,7 @@ def assess(patient_id: str, body: AssessIn):
     then draft a plan for the doctor to review. Severe: a "doctor must write
     the plan" item with no exercises. Returns {assessment, draft}."""
     try:
-        return generate_plan(patient_id, body.doctor_id)
+        return generate_plan(patient_id, body.doctor_id, body.reading_days)
     except ValueError as exc:  # unknown patient
         raise HTTPException(404, str(exc))
 
