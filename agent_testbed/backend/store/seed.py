@@ -153,8 +153,10 @@ def _from_csv() -> tuple[dict, dict, dict]:
         "max_sets": _int(r["max_sets"], 1), "max_amount": _float(r["max_amount"], 1),
         "per_side": r["per_side"].strip().lower() == "true", "rest_seconds": _int(r["rest_seconds"]),
         "progression_step": _float(r["progression_step"], 1), "priority_order": _int(r["priority_order"], 0),
-        # Steps separated by "|"; used when the reference DB has none for this exercise.
-        "instructions": [s.strip() for s in (r.get("instructions") or "").split("|") if s.strip()], "images": [],
+        # Steps and picture links, each separated by "|" (copied from the
+        # reference DB on 2026-11-04 for the exercises it had them for).
+        "instructions": [s.strip() for s in (r.get("instructions") or "").split("|") if s.strip()],
+        "images": [u.strip() for u in (r.get("images") or "").split("|") if u.strip()],
         **{k: (r.get(k) or "").strip() for k in EXERCISE_PROPERTIES},
         "breath_hold": (r.get("breath_hold") or "").strip().lower() == "true"}
         for r in _rows("activity_taxonomy.csv")}

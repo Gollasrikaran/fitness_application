@@ -329,3 +329,24 @@ DATE: 2026-09-21
     assert ctx["medicines"]["from"] == "2026-09-21"
     assert ctx["medicines"]["patient_instructions"] == "Investigation --normal, BP --118/75"
     assert ctx["care"]["recent_complaints"][0]["date"] == "2026-09-21"
+
+
+def test_visit_history_has_every_visit_and_costs_no_extra_call(monkeypatch):
+    """The doctor's picker: all visits (the AI's record keeps the latest 10),
+    from the /summary and /timeline already fetched when the patient opened."""
+    timeline = "".join(f"DATE: 2026-{m:02d}-01\n  VISIT ID: v{m}\n  Prescription Instructions (database): note {m}\n"
+                       for m in range(1, 13))  # 12 visits, oldest first
+    summary = {"patient_id": "p7", "age_years": 50, "sex": "MALE", "visits": [], "vitals": []}
+    responses = {"/patients/p7/summary": summary, "/patients/p7/timeline": {"timeline": timeline},
+                 "/patients/kid/summary": {**summary, "age_years": 9}, "/doctors": {"doctors": []}}
+    calls = []
+    monkeypatch.setattr(patient_api, "get", lambda path, **_: calls.append(path) or responses.get(path))
+    clinic_api._cache.clear()
+    ctx = clinic_api.patient_context("p7")
+    history = clinic_api.visit_history("p7")
+    assert len(ctx["visits"]) == 10 and len(history) == 12
+    assert [v["patient_instructions"] for v in history[:2]] == ["note 12", "note 11"]
+    assert history[-1]["date"] == "2026-01-01"
+    assert calls.count("/patients/p7/summary") == 1 and calls.count("/patients/p7/timeline") == 1
+    assert clinic_api.visit_history("kid") is None and clinic_api.visit_history("nobody") is None
+    clinic_api._cache.clear()

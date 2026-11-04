@@ -74,6 +74,16 @@ def patient_doctors(patient_id: str):
     return clinic.patient_doctors(patient_id)
 
 
+@app.get("/patients/{patient_id}/visits")
+def visit_history(patient_id: str):
+    """Every visit, newest first, for the doctor's visit-history picker.
+    Screen only: the AI reads the latest visits from the context."""
+    visits = clinic.visit_history(patient_id)
+    if visits is None:
+        raise HTTPException(404, "Patient not found")
+    return visits
+
+
 @app.get("/patients/{patient_id}/context")
 def patient_context(patient_id: str):
     context = clinic.patient_context(patient_id)

@@ -23,7 +23,7 @@ def fetch() -> dict[str, list[dict]] | None:
     when it isn't configured or can't be reached."""
     url = _url()
     if not url:
-        log.warning("REFERENCE_DATABASE_URL is not set: using data/*.csv only")
+        log.info("No reference DB set: using data/*.csv only (they hold everything since 2026-11-04)")
         return None
     try:
         # prepare_threshold=None: required behind Supabase's connection pooler.

@@ -401,9 +401,10 @@ function ContextPanel({ patientId }) {
         ))}
       </Section>
       {ctx.visits.some((v) => v.patient_instructions) && (
-        <Section title="Doctor's notes by visit">
+        <Section title="Doctor's notes (latest 3 visits)">
           {ctx.visits
             .filter((v) => v.patient_instructions)
+            .slice(0, 3)
             .map((v, i) => (
               <Row key={i}>
                 <span className="muted">
@@ -416,6 +417,8 @@ function ContextPanel({ patientId }) {
             ))}
         </Section>
       )}
+
+      <VisitHistory patientId={patientId} />
 
       <Section title="Recent vitals" empty="No vitals recorded">
         {vitals_recent.length > 0 && <VitalsTable rows={vitals_recent} />}
@@ -462,6 +465,81 @@ function ContextPanel({ patientId }) {
         <pre>{JSON.stringify(ctx, null, 2)}</pre>
       </details>
     </>
+  );
+}
+
+// Every visit, picked by date: what was recorded at it. For the doctor only:
+// the AI reads the latest visits from the context, not this.
+function VisitHistory({ patientId }) {
+  const [visits, setVisits] = useState(null);
+  const [picked, setPicked] = useState(0);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setVisits(null);
+    setPicked(0);
+    setError("");
+    api("GET", `/patients/${patientId}/visits`)
+      .then(setVisits)
+      .catch((e) => setError(e.message));
+  }, [patientId]);
+
+  if (error) return <p className="error small pad">Couldn't load the visit history: {error}</p>;
+  if (!visits?.length) return null;
+  const v = visits[picked] || visits[0];
+  const vitals = Object.entries(v.vitals || {});
+  return (
+    <Section title={`Visit history (${visits.length} visits)`}>
+      <select value={picked} onChange={(e) => setPicked(Number(e.target.value))}>
+        {visits.map((x, i) => (
+          <option key={i} value={i}>
+            {x.date}
+            {x.doctor ? ` · Dr. ${x.doctor}` : ""}
+            {x.complaint ? ` · ${x.complaint.slice(0, 40)}` : ""}
+          </option>
+        ))}
+      </select>
+      <Row>
+        <span className="muted">Complaint: </span>
+        {v.complaint || "—"}
+        {v.duration ? ` (${v.duration})` : ""}
+      </Row>
+      {(v.diagnosis_confirmed || v.diagnosis_provisional) && (
+        <Row>
+          <span className="muted">Diagnosis: </span>
+          {v.diagnosis_confirmed || `${v.diagnosis_provisional} (provisional)`}
+        </Row>
+      )}
+      {vitals.length > 0 && (
+        <Row>
+          <span className="muted">Readings: </span>
+          {vitals.map(([k, x]) => `${pretty(k)} ${x}`).join(" · ")}
+        </Row>
+      )}
+      {v.labs?.length > 0 && (
+        <Row>
+          <span className="muted">Labs: </span>
+          {v.labs.map((l) => `${l.name} ${l.value}${l.status ? ` (${l.status})` : ""}`).join(" · ")}
+        </Row>
+      )}
+      {v.medicines?.length > 0 && (
+        <Row>
+          <span className="muted">Medicines: </span>
+          {v.medicines.map((m) => m.name).join(", ")}
+        </Row>
+      )}
+      {v.emergency && <Row>Emergency visit</Row>}
+      {v.referral && (
+        <Row>
+          Referral{v.referral.to ? ` to ${v.referral.to}` : ""}
+          {v.referral.for ? ` for ${v.referral.for}` : ""}
+        </Row>
+      )}
+      <Row>
+        <span className="muted">Doctor's note: </span>
+        <span className="pre">{v.patient_instructions || "—"}</span>
+      </Row>
+    </Section>
   );
 }
 

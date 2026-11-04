@@ -27,6 +27,7 @@ _VITAL_KEYS = ("bp", "bp_sys", "bp_dia", "pulse", "spo2", "temp_f", "temp_c", "s
 RECENT_VISITS = 10       # visits the context looks back over
 FLAG_VISITS = 5          # visits whose vital flags count as "recent"
 MIN_AGE = 18             # the agent is for adults
+HISTORY_VISITS = 500     # the doctor's visit-history picker (screen only, never the AI)
 
 # The patient's latest completed visits, as a subquery every context query
 # can use, so they all run independently (and in parallel).
@@ -142,9 +143,37 @@ def _visit_entry(visit: dict, rx: dict | None, medicines_by_rx: dict) -> dict:
     return {k: v for k, v in entry.items() if v not in (None, "", [], {})}
 
 
-def _context_queries() -> dict[str, tuple[str, str]]:
-    """name -> (fetch kind, SQL). All take only %(id)s, so they run in parallel."""
-    recent = _RECENT_VISIT_IDS.format(n=RECENT_VISITS)
+def _medicines_by_rx(rows: list[dict]) -> dict[str, list[dict]]:
+    out = defaultdict(list)
+    for item in rows:
+        out[item["prescription_id"]].append(_medicine(item))
+    return out
+
+
+def _visit_entries(visits: list[dict], prescriptions: list[dict], medicines_by_rx: dict) -> list[dict]:
+    rx_by_visit = {}
+    for rx in prescriptions:  # newest first, so a visit keeps its latest prescription
+        rx_by_visit.setdefault(rx["visit_id"], rx)
+    return [_visit_entry(v, rx_by_visit.get(v["id"]), medicines_by_rx) for v in visits]
+
+
+def visit_history(patient_id: str) -> list[dict] | None:
+    """Every completed visit (up to HISTORY_VISITS), newest first, in
+    patient_context()'s "visits" shape: for the doctor's visit-history
+    picker. Screen only, never sent to the AI. None for an unknown patient."""
+    queries = _context_queries(HISTORY_VISITS)
+    args = {"id": patient_id}
+    if fetch_one(queries["patient"][1], args) is None:
+        return None
+    visits, prescriptions, medicines = (fetch_all(queries[name][1], args)
+                                        for name in ("visits", "prescriptions", "medicines"))
+    return _visit_entries(visits, prescriptions, _medicines_by_rx(medicines))
+
+
+def _context_queries(visits: int = RECENT_VISITS) -> dict[str, tuple[str, str]]:
+    """name -> (fetch kind, SQL), over the latest `visits` visits. All take
+    only %(id)s, so they run in parallel."""
+    recent = _RECENT_VISIT_IDS.format(n=visits)
     return {
         "patient": ("one", f"""
             SELECT p.id::text AS id, p.age_years, p.sex, p.preferred_language, p.created_at::date AS registered_on,
@@ -219,12 +248,7 @@ def patient_context(patient_id: str) -> dict | None:
     latest_rx = prescriptions[0] if prescriptions else None
     totals, followups = r["totals"], r["followups"]
     flags, recorded, episodes, tasks = r["flags"], r["recorded"], r["episodes"], r["tasks"]
-    medicines_by_rx = defaultdict(list)
-    for item in r["medicines"]:
-        medicines_by_rx[item["prescription_id"]].append(_medicine(item))
-    rx_by_visit = {}
-    for rx in prescriptions:  # newest first, so a visit keeps its latest prescription
-        rx_by_visit.setdefault(rx["visit_id"], rx)
+    medicines_by_rx = _medicines_by_rx(r["medicines"])
 
     history = p["health_history_json"] if isinstance(p["health_history_json"], dict) else {}
     def answered(keys):
@@ -256,7 +280,7 @@ def patient_context(patient_id: str) -> dict | None:
         "history_other": answered(_HISTORY_OTHER),
         "vitals_recent": [{"date": v["date"], **_vitals(v["vitals_json"])} for v in visits],
         "vital_flags": flags,
-        "visits": [_visit_entry(v, rx_by_visit.get(v["id"]), medicines_by_rx) for v in visits],
+        "visits": _visit_entries(visits, prescriptions, medicines_by_rx),
         "medicines": {"from": latest_rx["date"] if latest_rx else None,
                       "items": medicines_by_rx[latest_rx["id"]] if latest_rx else [],
                       "patient_instructions": latest_rx["patient_instructions"] if latest_rx else None,

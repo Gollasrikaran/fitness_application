@@ -202,15 +202,18 @@ def _sex(value) -> str | None:
     return str(value).upper() if value else None
 
 
-def build_context(summary: dict, timeline: str, doctor_names: dict[str, str] | None = None,
-                  today: date | None = None) -> dict:
-    """The patient record in app/clinic.py's patient_context() shape."""
-    names = doctor_names or {}
+def _visits(summary: dict, timeline: str, names: dict[str, str],
+            limit: int | None) -> tuple[list[dict], dict[str, dict], list[dict]]:
+    """The visits, newest first, at most `limit` (None: all): (timeline
+    entries, vitals by visit id, visits in app/clinic.py's shape)."""
     by_visit = vitals_by_visit(summary)
     meta = {v["visit_id"]: v for v in summary.get("visits") or []}
+    entries = parse_timeline(timeline)
+    if not entries:  # no timeline: the visits from /summary, without complaints or diagnoses
+        entries = [{"date": v["visit_date"], "visit_id": v["visit_id"]} for v in summary.get("visits") or []]
     # Newest first, whatever order the timeline lists them in (some list the
     # oldest first); visits on the same date keep the timeline's order.
-    entries = sorted(parse_timeline(timeline), key=lambda e: e["date"], reverse=True)[:RECENT_VISITS]
+    entries = sorted(entries, key=lambda e: e["date"], reverse=True)[:limit]
     for e in entries:  # lab results count as readings, as the clinic DB's vitals do
         readings = lab_readings(e.get("labs") or [])
         if readings:
@@ -219,12 +222,10 @@ def build_context(summary: dict, timeline: str, doctor_names: dict[str, str] | N
                 if k not in vitals:  # a reading taken at the visit wins
                     vitals[k] = v
                     vitals.setdefault("from_lab", []).append(k)  # counts for longer (store.plans)
-    if not entries:  # no timeline: the visits from /summary, without complaints or diagnoses
-        entries = [{"date": v["visit_date"], "visit_id": v["visit_id"]} for v in summary.get("visits") or []]
 
     visits = []
     for e in entries:
-        m = meta.get(e.get("visit_id"), {})
+        m = meta.get(e.get("visit_id"), {})  # /summary lists the last 10 visits: older ones have no doctor
         vitals = {k: v for k, v in by_visit.get(e.get("visit_id"), {}).items() if k not in ("date", "from_lab")}
         visit = {"date": e["date"], "doctor": names.get(m.get("doctor_id")), "complaint": e.get("complaint"),
                  "vitals": vitals, "diagnosis_provisional": e.get("provisional"),
@@ -233,6 +234,15 @@ def build_context(summary: dict, timeline: str, doctor_names: dict[str, str] | N
         if m.get("is_referral_recommended"):
             visit["referral"] = {"to": m.get("referral_specialist_name"), "for": m.get("referral_treatment_name")}
         visits.append({k: v for k, v in visit.items() if v not in (None, "", [], {})})
+    return entries, by_visit, visits
+
+
+def build_context(summary: dict, timeline: str, doctor_names: dict[str, str] | None = None,
+                  today: date | None = None) -> dict:
+    """The patient record in app/clinic.py's patient_context() shape."""
+    names = doctor_names or {}
+    meta = {v["visit_id"]: v for v in summary.get("visits") or []}
+    entries, by_visit, visits = _visits(summary, timeline, names, RECENT_VISITS)
 
     # Vitals: every visit /summary has them for, newest first.
     vitals_recent = sorted(by_visit.values(), key=lambda v: str(v["date"]), reverse=True)
@@ -388,9 +398,26 @@ def patient_context(patient_id: str) -> dict | None:
     _remember(patient_id, summary.get("age_years"), summary.get("sex"))
     if (summary.get("age_years") or 0) < MIN_AGE:
         return None  # the agent is for adults only
-    timeline = (patient_api.get(f"/patients/{patient_id}/timeline") or {}).get("timeline", "")
+    return build_context(summary, _timeline(patient_id), _doctor_names())
+
+
+def visit_history(patient_id: str) -> list[dict] | None:
+    """Every visit, newest first, in patient_context()'s "visits" shape: for
+    the doctor's visit-history picker. Screen only, never sent to the AI.
+    From the /summary and /timeline the opened record already fetched
+    (cached), so no extra call. None for an unknown patient or a child."""
+    summary = _cached(f"/patients/{patient_id}/summary")
+    if summary is None or (summary.get("age_years") or 0) < MIN_AGE:
+        return None
+    return _visits(summary, _timeline(patient_id), _doctor_names(), None)[2]
+
+
+def _timeline(patient_id: str) -> str:
+    return (_cached(f"/patients/{patient_id}/timeline") or {}).get("timeline", "")
+
+
+def _doctor_names() -> dict[str, str]:
     try:
-        names = {d["doctor_id"]: d.get("name") for d in _doctors()}
+        return {d["doctor_id"]: d.get("name") for d in _doctors()}
     except patient_api.PatientApiError:
-        names = {}
-    return build_context(summary, timeline, names)
+        return {}
