@@ -61,7 +61,7 @@ Return:
    - For asthma use asthma_controlled; whether it is under control is decided by fixed rules. Use asthma_uncontrolled only when a diagnosis or complaint says so (e.g. "acute exacerbation of asthma"). COPD, COAD, chronic bronchitis and emphysema are copd, not asthma.
    - other_unlisted is only for a problem that affects exercise and fits no code (e.g. shoulder or foot pain, a serious illness). Not for stomach, skin, urine, menstrual or other problems that don't affect exercise.
    - Leave out short-lived illnesses that don't affect exercise (fever, cold, cough, skin problems) unless they still matter.
-2. problem: one line in plain clinical English: what the patient's exercise-relevant problem is.
+2. problem: one line in plain clinical English: what the patient's exercise-relevant problem is. Don't say whether BP, sugar or asthma is under control: fixed rules decide that after you.
 3. body_area: the body parts involved, or "general".
 4. severity:
    - "severe": the patient should not get an exercise plan without a doctor deciding it directly: new nerve signs (numbness, weakness, radiating pain), chest pain, breathlessness, fainting, a recent fracture, injury or surgery, uncontrolled BP or sugar, pregnancy, serious illness.
@@ -83,6 +83,6 @@ PATIENT gives the age, sex and BMI, the assessed problem and body area, the pati
 Return:
 1. exercises: {low} to {high} exercises from ALLOWED, by activity_type, in the order the patient should do them. Choose the ones that help the patient's problem and body area most, prefer exercises without CAUTION, and keep the plan gentle. For each, why: one short line for the doctor saying what the exercise works and how it fits the problem or body area (e.g. "strengthens the hips, which supports the knee"). Make no claims about effects on illnesses, organs or hormones; if an exercise doesn't relate to the problem, say it is for general mobility.
 2. instructions: 2 to 4 short sentences for the patient, in plain simple English (many have little schooling). Tell them to go slowly and to stop and phone their doctor if they feel pain, dizziness, chest pain or breathlessness. Don't name exercises or give doses or how often: the plan shows those, and the doctor decides them.
-3. reason: one or two lines for the doctor: why this set suits this patient.
+3. reason: one or two lines for the doctor: why this set suits this patient. Call each condition by its name in PATIENT; don't say a condition is under control unless its name says so.
 
 Use only activity_type values from ALLOWED. Never invent anything."""
