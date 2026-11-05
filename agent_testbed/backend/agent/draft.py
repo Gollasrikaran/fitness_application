@@ -166,13 +166,16 @@ def assessment_age(patient: dict) -> int | None:
 
 def eligibility_note(context: dict) -> str | None:
     """The "can exercise" screening (Patient Intelligence API), when it says
-    no: a warning line for the doctor. It never withholds the draft; the
-    doctor decides (decided 2026-11-03). The clinic DB source has no such check."""
+    no: a note for the doctor, with the screening's own reason. It is research
+    on who benefits from exercise, not a safety check: it never withholds the
+    draft (decided 2026-11-03). The clinic DB source has no such check."""
     summary = context.get("clinical_summary") or {}
     if summary.get("exercise_suitable") is not False:
         return None
-    return (f"Warning: the exercise screening marks this patient not suitable for exercise "
-            f"(main type: {summary.get('patient_type') or 'not given'}). Please check before approving.")
+    reason = (summary.get("exercise_reason") or "").strip()
+    return (f"Note: the exercise screening (research, not a safety check) marks this patient not suitable "
+            f"for exercise (main type: {summary.get('patient_type') or 'not given'})."
+            + (f" Its reason: {reason}." if reason else "") + " Please check before approving.")
 
 
 def patient_profile(context: dict) -> dict:

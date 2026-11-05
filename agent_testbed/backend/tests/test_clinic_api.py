@@ -190,7 +190,7 @@ def test_record_values(ctx):
     assert ctx["care"]["visits"] == 3 and ctx["care"]["first_visit"] == "2026-03-02"
     assert ctx["medicines"]["items"] == [{"name": "Inh Foracort"}, {"name": "Amlodipine 5"}]
     assert ctx["clinical_summary"] == {"exercise_suitable": False, "patient_type": "Cardiovascular",
-                          "flags": [{"level": "medium", "title": "Recurring respiratory symptoms", "evidence": "x"}]}
+                          "exercise_reason": None, "flags": [{"level": "medium", "title": "Recurring respiratory symptoms", "evidence": "x"}]}
 
 
 def test_readings_rules_can_read_the_api_vitals(ctx):
@@ -219,6 +219,14 @@ def test_not_suitable_is_a_warning_line_for_the_doctor(ctx):
     assert patient_profile(ctx)["eligibility_note"] == note
     assert eligibility_note({**ctx, "clinical_summary": {**ctx["clinical_summary"], "exercise_suitable": True}}) is None
     assert eligibility_note({k: v for k, v in ctx.items() if k != "clinical_summary"}) is None  # the database source
+
+
+def test_not_suitable_shows_the_screenings_reason(ctx):
+    # 1123000d (2026-11-05): "not suitable" only meant "no specific benefit".
+    why = "No cluster where exercise gives a specific benefit (not harmful either)"
+    note = eligibility_note({**ctx, "clinical_summary": {**ctx["clinical_summary"], "exercise_reason": why}})
+    assert "not a safety check" in note and f"Its reason: {why}." in note
+    assert "Its reason" not in eligibility_note(ctx)  # no reason given: no empty line
 
 
 # ── The five functions, with the API faked ──────────────────────────────────

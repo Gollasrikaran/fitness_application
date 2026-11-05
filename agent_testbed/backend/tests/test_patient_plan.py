@@ -2,6 +2,8 @@
 approved, with each exercise's details in plain words."""
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import select
+
 from store import plans
 from store.models import Exercise, Plan, PlanProposal
 
@@ -81,10 +83,14 @@ def test_doses_in_plain_words(db):
     assert [e["dose"] for e in out["exercises"]] == ["2 sets × 5 repetitions", "1.5 km", "3 sets × hold 20 seconds"]
 
 
-def test_no_steps_and_no_rest_still_shows(db):
-    # Without the reference DB the original exercises have no steps.
+def test_steps_come_from_our_csv_and_one_set_has_no_rest(db):
+    # Since 2026-11-04 every exercise's steps (and pictures) are in data/*.csv:
+    # the original exercises' ones were copied from the reference DB.
     e = plans.patient_plan(db, approved(db, "p1", [item("glute_bridge", 1, 5)]), None)["exercises"][0]
-    assert e["steps"] == [] and e["rest_seconds"] is None  # one set: no rest between sets
+    assert e["steps"][0].startswith("Lie flat on the floor") and e["rest_seconds"] is None  # one set: no rest
+    every = list(db.scalars(select(Exercise)))
+    assert all(x.instructions for x in every)
+    assert len(db.get(Exercise, "glute_bridge").images) == 2
 
 
 def test_an_exercise_since_removed_from_the_table_still_shows(db):

@@ -206,3 +206,26 @@ def test_no_ai_answer_lowers_severity_or_removes_a_condition(ref):
             assert code in out["codes"] or stricter.get(code) in out["codes"]
         if any(ref.conditions[c]["bucket"] == "refer" for c in out["codes"] if c != "none"):
             assert out["severity"] == "severe"
+
+
+# ── No reading: control not known (1123000d, 2026-11-05) ─────────────────────
+
+def test_diabetes_with_no_sugar_reading_says_control_not_known(ref):
+    ctx = context(visits=[visit("2026-10-20", diagnosis="T2DM", bp="113/76")])
+    out = assess(ctx, ref)
+    dm = next(c for c in out["conditions"] if c["code"] == "diabetes_controlled")
+    assert dm["name"] == "Diabetes, control not known (no sugar reading)"
+    assert any("not known" in e for e in dm["evidence"])
+    assert out["severity"] != "severe"  # the safety decision is unchanged
+
+
+def test_diabetes_with_an_unflagged_reading_is_still_under_control(ref):
+    ctx = context(visits=[visit("2026-10-20", diagnosis="T2DM", sugar_mg_dl=120)])
+    dm = next(c for c in assess(ctx, ref)["conditions"] if c["code"] == "diabetes_controlled")
+    assert "not known" not in dm["name"]
+
+
+def test_bp_with_no_reading_says_control_not_known(ref):
+    bp = next(c for c in assess(context(visits=[visit("2026-10-20", diagnosis="HTN")]), ref)["conditions"]
+              if c["code"] == "bp_controlled")
+    assert bp["name"] == "BP, control not known (no BP reading)"

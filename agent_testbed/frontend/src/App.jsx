@@ -335,10 +335,11 @@ function ContextPanel({ patientId }) {
         <Section title="Clinical flags">
           <Row>
             Exercise:{" "}
-            <span className={`badge ${summary.exercise_suitable === false ? "emergency" : "routine"}`}>
+            <span className={`badge ${summary.exercise_suitable === false ? "priority" : "routine"}`}>
               {summary.exercise_suitable === false ? "not suitable" : summary.exercise_suitable ? "suitable" : "not assessed"}
             </span>
             {summary.patient_type ? ` · main type ${summary.patient_type}` : ""}
+            {summary.exercise_reason && <span className="muted"> · {summary.exercise_reason} (screening, not a safety check)</span>}
           </Row>
           {summary.flags.map((f, i) => (
             <Row key={i}>

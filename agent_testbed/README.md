@@ -59,13 +59,21 @@ AI drafts). Approve / Reject (with a reason) / Close case.
 
 ## Data
 
+Where patient records come from is set by `CLINIC_SOURCE` in `backend/.env`:
+`db` reads the clinic database directly (production, `app/clinic.py`); `api`
+reads the colleague's Patient Intelligence API (`app/clinic_api.py`, with
+`PATIENT_API_URL` and `PATIENT_API_KEY`), while the database is suspended.
+Both return the same record, so nothing else changes. `GET /health` says
+which one is in use.
+
 - **Clinic database** (the one `dataanalysis/` uses), **read-only**: every
   transaction is opened READ ONLY, so the database refuses any write. Only
   adults (18+) are listed; deleted, test and merged records are left out.
   Patient names, phones, addresses and IDs are never read.
-- **Reference database** (a colleague's), **read-only**, read once at start:
-  conditions, safety grid, exercise instructions and images. Without it the
-  app runs on `data/*.csv` alone.
+- **Reference database** (a colleague's): **switched off since 2026-11-04**.
+  Our `data/*.csv` hold everything it gave us (the 10 older exercises' steps
+  and picture links were copied in). Setting `REFERENCE_DATABASE_URL` again
+  would merge it back in at startup, read-only.
 
 ## Run
 
@@ -118,7 +126,7 @@ cd agent_testbedackend
 | `GET /patients/{id}/agent` | Approved plan, pending draft with its assessment, open case (Doctor tab) |
 | `GET /review-queue?doctor_id=` | Drafts this doctor generated that are waiting for review, oldest first |
 | `GET /review-summary?doctor_id=` | How doctors handled the drafts: approved as drafted, edited or rejected, and what they changed |
-| `GET /exercises?conditions=` | All exercises (17) for the doctor's picker, with the grid's verdict for those conditions |
+| `GET /exercises?conditions=` | All exercises (25) for the doctor's picker, with the grid's verdict for those conditions |
 | `POST /plans/check` | `{conditions, exercises}` → small warnings per exercise (never blocks) |
 | `POST /chat` | `{patient_id, doctor_id, message}` → `{reply, conditions}` |
 | `GET /chat/history?patient_id=&doctor_id=` | The saved conversation, oldest first |

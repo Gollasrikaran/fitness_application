@@ -292,6 +292,7 @@ def build_context(summary: dict, timeline: str, doctor_names: dict[str, str] | N
         },
         "labs": [{"date": e["date"], **lab} for e in entries for lab in e.get("labs") or []],
         "clinical_summary": {"exercise_suitable": summary.get("exercise_suitable"), "patient_type": summary.get("patient_type"),
+                "exercise_reason": summary.get("exercise_reason"),
                 "flags": [{k: f.get(k) for k in ("level", "title", "evidence")}
                           for f in snap.get("flags") or [] if f.get("level") in ("high", "medium")]},
         "as_of": today or date.today(),

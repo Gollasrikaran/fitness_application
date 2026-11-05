@@ -24,27 +24,35 @@ _ASTHMA_COMPLAINTS = {"Breathlessness", "Wheeze"}  # warning-complaint labels, l
 ASTHMA_SPO2_BELOW = 94
 
 
-def _uncontrolled(visits: list[dict], flags: list[dict], flag: re.Pattern, keys: tuple, what: str) -> tuple[bool, str]:
+# With no reading, the safety decision stays "controlled" (BP's cautious
+# default is in the reading rules), but the name says control isn't known.
+_UNKNOWN_NAME = {"bp_controlled": "BP, control not known (no BP reading)",
+                 "diabetes_controlled": "Diabetes, control not known (no sugar reading)"}
+
+
+def _uncontrolled(visits: list[dict], flags: list[dict], flag: re.Pattern, keys: tuple, what: str) -> tuple[bool | None, str]:
     """Not under control when the latest reading is flagged high, or any
-    reading in the last 5 visits is critical. Returns (uncontrolled, why)."""
+    reading in the last 5 visits is critical. Returns (uncontrolled, why);
+    uncontrolled is None when there is no reading at all."""
     critical = sorted({f"{f['code']} on {f['date']}" for f in flags
                        if flag.search(f["code"]) and f["severity"] == "CRITICAL"})
     if critical:
         return True, f"critical {what} reading: {', '.join(critical)}"
     latest = next((str(v["date"]) for v in visits if any(k in v.get("vitals", {}) for k in keys)), None)
     if latest is None:
-        return False, f"no {what} reading in the recent visits"
+        return None, f"no {what} reading in the recent visits, so whether it is under control is not known"
     high = sorted({f["code"] for f in flags if flag.search(f["code"]) and str(f["date"]) == latest})
     if high:
         return True, f"latest {what} reading ({latest}) flagged {', '.join(high)}"
     return False, f"latest {what} reading ({latest}) not flagged high; nothing critical in the last 5 visits"
 
 
-def _resolve_markers(findings: list[Finding], context: dict) -> list[tuple[str, str]]:
+def _resolve_markers(findings: list[Finding], context: dict) -> tuple[list[tuple[str, str]], set[str]]:
     """bp_any / diabetes_any -> controlled or not, from the clinic's vital
-    flags. Returns (code, evidence line) per decision."""
+    flags. Returns (code, evidence line) per decision, and the "controlled"
+    codes decided with no reading at all."""
     visits, flags = context["visits"], context["vital_flags"]
-    notes = []
+    notes, unknown = [], set()
     for marker, strict, mild, flag, keys, what in (("bp_any", "high_bp", "bp_controlled", _BP_FLAG, _BP_KEYS, "BP"),
                                                    ("diabetes_any", "diabetes", "diabetes_controlled", _SUGAR_FLAG,
                                                     _SUGAR_KEYS, "sugar")):
@@ -55,7 +63,9 @@ def _resolve_markers(findings: list[Finding], context: dict) -> list[tuple[str, 
             if f.code == marker:
                 f.code = strict if bad else mild
         notes.append((strict if bad else mild, why))
-    return notes
+        if bad is None:
+            unknown.add(mild)
+    return notes, unknown
 
 
 def _latest_spo2(visits: list[dict]) -> tuple[float, str] | None:
@@ -99,7 +109,8 @@ def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
         f.code = _TO_MARKER.get(f.code, f.code)
     # A clinic condition we can't map: a doctor decides.
     findings += [Finding("other_unlisted", "rules", u, u) for u in rules.unmapped]
-    flag_notes = _resolve_markers(findings, context) + _resolve_asthma(findings, context, rules)
+    flag_notes, unknown = _resolve_markers(findings, context)
+    flag_notes += _resolve_asthma(findings, context, rules)
 
     # The stricter reading wins: "controlled" evidence joins the uncontrolled
     # code, so the doctor still sees it (and the flags note below says why).
@@ -121,7 +132,8 @@ def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
 
     grouped: dict[str, dict] = {}
     for f in findings:
-        g = grouped.setdefault(f.code, {"code": f.code, "name": ref.conditions[f.code]["name"],
+        name = _UNKNOWN_NAME[f.code] if f.code in unknown else ref.conditions[f.code]["name"]
+        g = grouped.setdefault(f.code, {"code": f.code, "name": name,
                                         "bucket": ref.conditions[f.code]["bucket"], "found_by": set(),
                                         "complaint_only": True, "evidence": []})
         g["found_by"].add(f.found_by)
