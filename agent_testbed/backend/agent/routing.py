@@ -22,6 +22,12 @@ _TO_MARKER = {"bp_controlled": "bp_any", "diabetes_controlled": "diabetes_any", 
 # Asthma not under control (research/ASTHMA.md, Part B point 4). No medicines.
 _ASTHMA_COMPLAINTS = {"Breathlessness", "Wheeze"}  # warning-complaint labels, last 6 months
 ASTHMA_SPO2_BELOW = 94
+# Dizziness stops an AI draft only for higher-risk patients: age 60+, or BP,
+# diabetes or a heart condition (decided 2026-11-05, KNOWN_ISSUES.md #7; needs
+# clinical sign-off). For anyone else it is a concern the doctor sees.
+DIZZINESS = "Dizziness"
+DIZZINESS_STOP_AGE = 60
+DIZZINESS_STOP_CODES = {"bp_controlled", "high_bp", "diabetes_controlled", "diabetes", "heart_condition"}
 
 
 # With no reading, the safety decision stays "controlled" (BP's cautious
@@ -154,7 +160,16 @@ def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
     reasons += [f"Recorded by a doctor as severe: {c['name']}" for c in context["conditions"]["doctor_recorded"]
                 if str(c.get("severity") or "").upper() == "SEVERE"]
     reasons += [f"Emergency visit on {e['date']}" for e in context["alerts"]["emergencies"]]
-    reasons += [f"{w['label']} in the complaint on {w['date']}: \"{w['complaint']}\"" for w in rules.warnings]
+    age = (context.get("patient") or {}).get("age")
+    dizziness_stops = (age is not None and age >= DIZZINESS_STOP_AGE) or bool(DIZZINESS_STOP_CODES & set(grouped))
+    concerns = []
+    for w in rules.warnings:
+        line = f"{w['label']} in the complaint on {w['date']}: \"{w['complaint']}\""
+        if w["label"] == DIZZINESS and not dizziness_stops:
+            concerns.append(f"{line}. Not a stop on its own: under 60, with no BP, diabetes or heart condition. "
+                            "Please check it has passed.")
+        else:
+            reasons.append(line)
     if ai is None and not conditions:
         reasons.append("Assessment incomplete: the AI was unavailable and the rules found no condition")
     if ai is not None and ai["severity"] == "severe":
@@ -163,4 +178,4 @@ def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
     reasons = list(dict.fromkeys(reasons))  # the clinic can hold the same flag twice
     severity = "severe" if reasons else (ai["severity"] if ai is not None else "moderate")
     return {"codes": [g["code"] for g in conditions] or ["none"], "conditions": conditions,
-            "severity": severity, "severe_reasons": reasons}
+            "severity": severity, "severe_reasons": reasons, "concerns": list(dict.fromkeys(concerns))}

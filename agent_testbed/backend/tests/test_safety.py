@@ -229,3 +229,40 @@ def test_bp_with_no_reading_says_control_not_known(ref):
     bp = next(c for c in assess(context(visits=[visit("2026-10-20", diagnosis="HTN")]), ref)["conditions"]
               if c["code"] == "bp_controlled")
     assert bp["name"] == "BP, control not known (no BP reading)"
+
+
+# ── Dizziness stops a draft only for higher-risk patients (option 2, 2026-11-05) ──
+
+def aged(ctx, age):
+    return {**ctx, "patient": {"age": age}}
+
+
+def test_dizziness_in_a_young_patient_with_no_risk_is_a_concern_not_a_stop(ref):
+    out = assess(aged(context(visits=[visit("2026-10-20", complaint="Dizziness, acidity")]), 35), ref)
+    assert out["severity"] != "severe" and not out["severe_reasons"]
+    assert len(out["concerns"]) == 1 and out["concerns"][0].startswith("Dizziness in the complaint on 2026-10-20")
+
+
+@pytest.mark.parametrize("age, diagnosis", [(60, None), (80, None), (35, "HTN"), (35, "T2DM")])
+def test_dizziness_still_stops_at_60_or_with_bp_or_diabetes(ref, age, diagnosis):
+    ctx = aged(context(visits=[visit("2026-10-20", complaint="dizziness", diagnosis=diagnosis)]), age)
+    out = assess(ctx, ref)
+    assert out["severity"] == "severe" and any(r.startswith("Dizziness") for r in out["severe_reasons"])
+    assert not out["concerns"]
+
+
+def test_dizziness_still_stops_with_a_heart_condition(ref):
+    ctx = aged(context(visits=[visit("2026-10-20", complaint="dizziness")]), 35)
+    out = assess(ctx, ref, ai_findings=[Finding("heart_condition", "ai", "visit 2026-10-20, diagnosis", "x")])
+    assert any(r.startswith("Dizziness") for r in out["severe_reasons"])
+
+
+def test_other_warning_complaints_stop_whatever_the_age(ref):
+    out = assess(aged(context(visits=[visit("2026-10-20", complaint="chest pain")]), 25), ref)
+    assert out["severity"] == "severe" and not out["concerns"]
+
+
+def test_no_age_and_no_risk_codes_means_a_concern(ref):
+    # The database source always has an age; without one, the conditions alone decide.
+    out = assess(context(visits=[visit("2026-10-20", complaint="dizziness")]), ref)
+    assert not any(r.startswith("Dizziness") for r in out["severe_reasons"]) and out["concerns"]
