@@ -94,6 +94,43 @@ def test_timeline_gives_one_entry_per_visit_even_on_the_same_date():
     assert visits[1]["confirmed"] == "OA knee" and visits[0]["instructions"] == "Avoid dust"
 
 
+FOLLOWUP_TIMELINE = """PATIENT ID: p1
+DATE: 2026-09-16
+  VISIT ID: v2
+  Chief Complaint (database): Report study
+  Medicines — Prescription (database):
+    • T. Metformin, dosage 0-1-0, frequency After food, duration 15 days
+  Follow-up Schedule (3 scheduled | 0 completed | 1 missed):
+    • 2026-10-01 | MISSED
+    • 2026-11-20 | PENDING
+    • 2026-10-05 | CANCELLED
+DATE: 2026-09-09
+  VISIT ID: v1
+  Chief Complaint (database): Repor study
+  Follow-up Schedule (2 scheduled | 1 completed | 1 missed):
+    • 2026-09-12 | MISSED
+    • 2026-09-16 | COMPLETED → TAKING_MEDICINE_ON_TIME [Taking medicine on time]
+"""
+
+
+def test_followups_come_from_every_visit_in_the_timeline():
+    """0b84894f (AI_TESTING note 9): the screen said "0 missed" because the
+    API source had no follow-ups; they are in the timeline."""
+    visits = clinic_api.parse_timeline(FOLLOWUP_TIMELINE)
+    assert visits[0]["followups"] == [{"date": "2026-10-01", "status": "MISSED"},
+                                      {"date": "2026-11-20", "status": "PENDING"},
+                                      {"date": "2026-10-05", "status": "CANCELLED"}]
+    assert "labs" not in visits[0]  # a medicine bullet isn't a follow-up or a lab
+    assert clinic_api.followup_counts(visits) == {"pending": 1, "next_due": "2026-11-20", "missed": 2,
+                                                  "last_missed": "2026-10-01", "emergency": None}
+    ctx = clinic_api.build_context({**SUMMARY, "visits": []}, FOLLOWUP_TIMELINE, {}, TODAY)
+    assert ctx["care"]["followups"]["missed"] == 2
+
+
+def test_no_followups_in_the_timeline_means_none_recorded(ctx):
+    assert ctx["care"]["followups"] is None  # the screen says "none recorded", not "0 missed"
+
+
 def test_timeline_without_visit_ids_still_parses():
     visits = clinic_api.parse_timeline("DATE: 2026-01-05\n  Chief Complaint (database): back pain\n")
     assert visits == [{"date": "2026-01-05", "visit_id": None, "complaint": "back pain"}]

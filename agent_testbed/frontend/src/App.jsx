@@ -426,10 +426,15 @@ function ContextPanel({ patientId }) {
       </Section>
 
       <Section title="Care">
-        <Row>
-          Follow-ups: {care.followups?.pending || 0} pending
-          {care.followups?.next_due ? ` (next ${care.followups.next_due})` : ""} · {care.followups?.missed || 0} missed
-        </Row>
+        {care.followups ? (
+          <Row>
+            Follow-ups: {care.followups.pending || 0} pending
+            {care.followups.next_due ? ` (next ${care.followups.next_due})` : ""} · {care.followups.missed || 0} missed
+            {care.followups.last_missed ? ` (last ${care.followups.last_missed})` : ""}
+          </Row>
+        ) : (
+          <Row>Follow-ups: none recorded</Row>
+        )}
         {care.open_episodes.map((e, i) => (
           <Row key={`ep${i}`}>
             Open episode since {e.since}: {e.chief_complaint || "—"}

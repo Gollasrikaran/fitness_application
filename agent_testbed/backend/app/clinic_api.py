@@ -114,6 +114,23 @@ _FIELDS = {"chief complaint": "complaint", "provisional diagnosis": "provisional
 _LINE = re.compile(r"^\s*([A-Za-z][A-Za-z \-]*?)\s*(?:\([^)]*\))?\s*:\s*(.*)$")
 _EMPTY = {"", "not documented", "none", "-", "—"}
 _LAB = re.compile(r"^\s*•\s*([^:]+):\s*(.*?)\s*(?:\(Ref:.*?)?(?:\[([^\[\]]*(?:\([^)]*\))?)\])?\s*$")
+# "• 2026-10-01 | MISSED", "• 2026-09-16 | COMPLETED → VISIT_COMPLETED"
+_FOLLOWUP = re.compile(r"^\s*•\s*(\d{4}-\d{2}-\d{2})\s*\|\s*([A-Z_]+)")
+_PENDING = {"PENDING", "SCHEDULED"}  # the clinic DB's followup_schedule says PENDING
+
+
+def followup_counts(entries: list[dict]) -> dict | None:
+    """Follow-ups from every visit in the timeline, in app/clinic.py's shape:
+    {pending, next_due, missed, last_missed, emergency}. None when the
+    timeline lists no follow-ups. The timeline doesn't say which were
+    emergencies, so that count is None."""
+    items = [f for e in entries for f in e.get("followups") or []]
+    if not items:
+        return None
+    pending = sorted(f["date"] for f in items if f["status"] in _PENDING)
+    missed = sorted(f["date"] for f in items if f["status"] == "MISSED")
+    return {"pending": len(pending), "next_due": pending[0] if pending else None,
+            "missed": len(missed), "last_missed": missed[-1] if missed else None, "emergency": None}
 
 # Lab results the reading rules use -> our vitals_json keys, with the unit
 # they must be in. "Unverified" results are listed but never used by the rules.
@@ -151,21 +168,26 @@ def parse_lab(line: str) -> dict | None:
 def parse_timeline(text: str) -> list[dict]:
     """/timeline text -> one entry per visit, in the text's order (not always
     newest first: build_context sorts them):
-    {"date", "visit_id", "complaint", "provisional", "confirmed", "instructions", "labs"}.
+    {"date", "visit_id", "complaint", "provisional", "confirmed", "instructions", "labs", "followups"}.
     A date can hold several visits ("Visit A of 2"); each starts at its VISIT ID.
     A field can run over several unindented lines ("DUB\\nPerimenopause"):
-    they are joined with "; ". Lab results come from the visit's documents."""
-    visits, day, current, field, in_labs = [], None, None, None, False
+    they are joined with "; ". Lab results come from the visit's documents.
+    Follow-ups come from the visit's "Follow-up Schedule" lines
+    ("• 2026-10-01 | MISSED") as {"date", "status"}."""
+    visits, day, current, field, in_labs, in_followups = [], None, None, None, False, False
     for line in str(text or "").splitlines():
         m = re.match(r"^\s*DATE:\s*(\d{4}-\d{2}-\d{2})", line)
         if m:
-            day, current, field, in_labs = m[1], None, None, False
+            day, current, field, in_labs, in_followups = m[1], None, None, False, False
             continue
         m = re.match(r"^\s*VISIT ID:\s*(\S+)", line)
         if m and day:
             current = {"date": day, "visit_id": m[1]}
             visits.append(current)
-            field, in_labs = None, False
+            field, in_labs, in_followups = None, False, False
+            continue
+        if in_followups and current is not None and (m := _FOLLOWUP.match(line)):
+            current.setdefault("followups", []).append({"date": m[1], "status": m[2]})
             continue
         if field and line.strip() and not line[0].isspace() and not re.match(r"^[=\-]+$", line.strip()):
             more = line.strip().strip(",").strip()
@@ -178,6 +200,7 @@ def parse_timeline(text: str) -> list[dict]:
                 current["labs"].append(lab)
             continue
         in_labs = name.startswith("lab results")
+        in_followups = name.startswith("follow-up schedule")
         field = _FIELDS.get(name) if day else None
         if field:
             if current is None:  # a timeline without VISIT ID lines
@@ -284,7 +307,8 @@ def build_context(summary: dict, timeline: str, doctor_names: dict[str, str] | N
                  "recent_complaints": [{"date": e["date"], "complaint": e["complaint"], "duration": None,
                                         "doctor": names.get(meta.get(e.get("visit_id"), {}).get("doctor_id"))}
                                        for e in entries if e.get("complaint")],
-                 "followups": None, "open_episodes": [], "open_tasks": []},
+                 # every visit's follow-ups, not only the latest 10 visits'
+                 "followups": followup_counts(parse_timeline(timeline)), "open_episodes": [], "open_tasks": []},
         "alerts": {
             "emergencies": [{"date": v["date"], "diagnosis": v.get("diagnosis_confirmed") or v.get("diagnosis_provisional")}
                             for v in visits if v.get("emergency")],
