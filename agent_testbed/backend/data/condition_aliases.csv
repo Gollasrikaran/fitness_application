@@ -48,6 +48,8 @@ text,ihd,heart_condition,
 text,heart failure,heart_condition,
 text,angina,heart_condition,
 text,mi,heart_condition,
+text,acs,heart_condition,acute coronary syndrome
+text,acute coronary syndrome,heart_condition,
 text,cva,neurological,
 text,stroke,neurological,
 text,epilepsy,neurological,
@@ -81,6 +83,10 @@ text,spondylosis,spondylosis,
 text,cervical pain,spondylosis,
 text,neck pain,spondylosis,
 text,djd spine,spondylosis,
+text,djd knee spine,spondylosis,"knee and spine together (""DJD knee spine""); djd knee still finds the knee"
+text,djd knee and spine,spondylosis,knee and spine together; djd knee still finds the knee
+text,djd spine knee,arthritis_knee,spine and knee together; djd spine still finds the spine
+text,djd spine and knee,arthritis_knee,spine and knee together; djd spine still finds the spine
 text,pivd,herniated_disk,
 text,disc prolapse,herniated_disk,
 text,slip disc,herniated_disk,
@@ -128,6 +134,7 @@ text,plantar fascitis,other_unlisted,no foot exercises yet: doctor decides
 text,plantar fasciatis,other_unlisted,no foot exercises yet: doctor decides
 text,ankle pain,other_unlisted,no ankle exercises yet: doctor decides
 text,joint pain,other_unlisted,joint not named: doctor decides
+text,joints pain,other_unlisted,joint not named: doctor decides
 text,polyarthralgia,other_unlisted,joint not named: doctor decides
 text,arthralgia,other_unlisted,joint not named: doctor decides
 text,rheumatoid,other_unlisted,no exercise rules of ours: doctor decides

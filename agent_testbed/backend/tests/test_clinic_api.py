@@ -248,6 +248,20 @@ def test_the_rules_find_conditions_in_the_api_record(db, ctx):
     assert out["severity"] == "severe"  # breathlessness, an emergency visit, BP not under control
 
 
+@pytest.mark.parametrize("diagnosis", ["DJD knee spine", "DJD knee and spine", "DJD spine knee",
+                                       "DJD spine and knee", "djd knee, spine"])
+def test_djd_with_knee_and_spine_finds_both(db, diagnosis):
+    """0abd37c0 (AI_TESTING note 15): "DJD knee spine" found only the knee."""
+    timeline = f"DATE: 2026-08-19\n  VISIT ID: v1\n  Provisional Diagnosis (database): {diagnosis}\n"
+    ctx = clinic_api.build_context({**SUMMARY, "visits": [], "long_term_conditions": [], "health_history": {}},
+                                   timeline, {}, TODAY)
+    ref = load_reference(db)
+    ref.aliases = [ConditionAlias(**a) for a in _aliases(_from_csv()[0])]
+    ref.warnings = []
+    codes = {f.code for f in rule_findings(ctx, ref, TODAY).findings}
+    assert {"arthritis_knee", "spondylosis"} <= codes
+
+
 # ── The colleague's check: a warning, never a block (Option A, 2026-11-03) ──
 
 def test_not_suitable_is_a_warning_line_for_the_doctor(ctx):

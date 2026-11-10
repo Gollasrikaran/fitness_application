@@ -111,6 +111,13 @@ def _check(ai: AIAssessment, ref, record: dict) -> tuple[list[Finding], list[dic
             kept.append(Finding(code, "ai", f.where, f.quote, "complaint" in f.where.lower()))
     return kept, dropped, concerns
 
+_MISSING_READING = {"bp": re.compile(r"\b(blood pressure|bp)\b", re.I),
+                    "sugar": re.compile(r"\b(sugar|glucose)\b", re.I)}
+
+def _drop_known_missing(missing: list[str], readings: dict) -> list[str]:
+    have = {k for k in _MISSING_READING if readings.get(k) and not readings[k].get("older")}
+    return [m for m in missing if not any(_MISSING_READING[k].search(m) for k in have)]
+
 
 def run_assessment(patient_id: str, doctor_id: str, today: date | None = None,
                    context: dict | None = None, reading_days: int = plan_store.READING_DAYS) -> dict:
@@ -123,6 +130,9 @@ def run_assessment(patient_id: str, doctor_id: str, today: date | None = None,
         ref = load_reference(db)
     rules = rule_findings(context, ref, today)
     record = _record(context)
+
+    readings = plan_store.latest_readings(context["vitals_recent"], today, reading_days)
+
 
     ai, ai_findings, dropped, unlisted = None, [], [], []
     try:
@@ -138,11 +148,10 @@ def run_assessment(patient_id: str, doctor_id: str, today: date | None = None,
             patient_id=patient_id, doctor_id=doctor_id, codes=result["codes"], conditions=result["conditions"],
             severity=result["severity"], severe_reasons=result["severe_reasons"],
             problem=(ai or {}).get("problem", ""), body_area=(ai or {}).get("body_area", ""),
-            concerns=[*result["concerns"], *(ai or {}).get("concerns", []), *unlisted], missing=(ai or {}).get("missing", []),
+            concerns=[*result["concerns"], *(ai or {}).get("concerns", []), *unlisted], missing=_drop_known_missing((ai or {}).get("missing", []), readings),
             unmapped=rules.unmapped, warnings=rules.warnings, ai_status="ok" if ai else "failed",
             ai_output=ai, dropped=dropped, model=MODEL,
-            readings={**plan_store.latest_readings(context["vitals_recent"], today, reading_days),
-                      "days": reading_days})
+            readings={**readings, "days": reading_days})
         db.add(saved)
         db.flush()
         return assessment_store.assessment_dict(saved, full=True)

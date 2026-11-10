@@ -64,7 +64,8 @@ export default function App() {
       .then((list) => {
         if (!live) return;
         setSeenBy({ patientId, list });
-        if (!list.length) setError(`No doctors found for patient #${patientId.slice(0, 8)} (unknown id, or under 18).`);
+        // No doctor on any visit (or an unknown id / under 18): any doctor may open the patient (POC).
+        if (!list.length) setError(`No doctor is recorded on patient #${patientId.slice(0, 8)}'s visits: choose any doctor above to continue.`);
         else {
           setError("");
           setDoctorId((current) => (list.some((d) => d.id === current) ? current : list[0].id));
@@ -109,7 +110,8 @@ export default function App() {
               onChange={(e) => {
                 const id = e.target.value;
                 setDoctorId(id);
-                if (!patientDoctors.some((d) => d.id === id)) {
+                if (!patientDoctors.length) setError(""); // a patient with no doctor: keep them, any doctor may open
+                else if (!patientDoctors.some((d) => d.id === id)) {
                   setPatientId(""); // another doctor's list: start over
                   setSearch("");
                 }
@@ -174,8 +176,9 @@ export default function App() {
         <div className="workspace">
           <Chat key={`${doctorId}-${patientId}`} patientId={patientId} doctor={doctor} onReply={bump} />
           <aside className="side">
-            <AgentPanel patientId={patientId} doctor={doctor} doctors={doctors} version={version} onChanged={bump} />
-            <ContextPanel patientId={patientId} />
+            {/* key: a new panel per patient, so a late reply for the previous patient can't land here */}
+            <AgentPanel key={`${doctorId}-${patientId}`} patientId={patientId} doctor={doctor} doctors={doctors} version={version} onChanged={bump} />
+            <ContextPanel key={patientId} patientId={patientId} />
           </aside>
         </div>
       )}
@@ -300,7 +303,11 @@ function ContextPanel({ patientId }) {
           {patient.age} y · {pretty(patient.sex)} · {patient.language || "language not recorded"}
         </div>
         <div className="small">
-          {body.bmi ? `BMI ${body.bmi} (${body.weight_kg} kg, ${body.height_cm} cm, ${body.measured_on})` : "No height/weight recorded"}
+          {body.bmi
+            ? `BMI ${body.bmi} (${body.weight_kg} kg, ${body.height_cm} cm, ${body.measured_on})`
+            : body.weight_kg
+              ? `Weight ${body.weight_kg} kg (${body.measured_on}) · no BMI: height ${body.height_cm ? `${body.height_cm} cm looks wrong` : "not recorded"}`
+              : "No height/weight recorded"}
         </div>
         <div className="small muted">
           {care.visits} visits · {care.first_visit} → {care.last_visit}

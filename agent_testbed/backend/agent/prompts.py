@@ -68,7 +68,9 @@ Return:
    - "moderate": exercise is fine with care.
    - "mild": no particular concern.
 5. concerns: what a doctor should know before exercise, one line each.
-6. missing: information that would change the plan (e.g. no recent BP reading).
+6. missing: information that would change the plan and is not in PATIENT_RECORD.
+   A reading from the last 90 days counts as recent. Don't list BP, sugar or
+   asthma readings to judge control: the rules decide that.
 
 Never invent anything."""
 
