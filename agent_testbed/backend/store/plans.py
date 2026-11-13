@@ -41,6 +41,9 @@ DEFAULT_EXPERIENCE = "beginner"
 # PROVISIONAL thresholds so we can build; the doctor confirms or replaces them.
 OLDER_AGE = 60         # at or above: high-impact and floor exercises left out, doses one step lower
 HIGH_BMI = 30.0        # at or above: high-impact and floor exercises left out (Exercise.impact, Exercise.position)
+# Underweight (2026-11-13; QUESTIONS_FOR_DOCTOR.md 1b, research/SOURCES_LOW_BP_UNDERWEIGHT_CKD.md):
+UNDERWEIGHT_BMI = 18.5  # below: vigorous left out, strength and balance first, a concern for the doctor
+SEVERE_THIN_BMI = 16.0  # below: a doctor writes the plan (agent/routing.py)
 MAX_EXERCISES = 5      # in any draft the agent makes
 # Walking is the core of the plan for BP, diabetes and asthma (research/*.md):
 # the first of these the patient is allowed always leads a draft, and the
@@ -196,8 +199,20 @@ def candidates(db: Session, codes: list[str], age: int | None,
             approved = [e for e in approved if not left_out(by_type[e["activity_type"]])]
             if dropped:
                 rules.append(f"{', '.join(dropped)} left out ({what}): {why} (provisional rule)")
+    thin = bmi is not None and bmi < UNDERWEIGHT_BMI
+    if thin:
+        dropped = [e["display_name"] for e in approved if by_type[e["activity_type"]].intensity == "vigorous"]
+        approved = [e for e in approved if by_type[e["activity_type"]].intensity != "vigorous"]
+        if dropped:
+            rules.append(f"{', '.join(dropped)} left out (vigorous): BMI {bmi} < {UNDERWEIGHT_BMI:g}, "
+                         "underweight (provisional rule)")
+        if any(by_type[e["activity_type"]].exercise_type in ("strength", "balance") for e in approved):
+            rules.append(f"Strength and balance exercises first: BMI {bmi} < {UNDERWEIGHT_BMI:g}, "
+                         "underweight (provisional rule)")
+    # Underweight: strength and balance first (light strength work is what's advised).
+    first = lambda e: not (thin and by_type[e["activity_type"]].exercise_type in ("strength", "balance"))
     # "safe" before "modify": a starter plan stays moderate.
-    approved.sort(key=lambda e: (e["verdict"] == "modify", ranks.get(e["activity_type"], 99),
+    approved.sort(key=lambda e: (e["verdict"] == "modify", first(e), ranks.get(e["activity_type"], 99),
                                  by_type[e["activity_type"]].priority_order))
     out = []
     for e in approved:

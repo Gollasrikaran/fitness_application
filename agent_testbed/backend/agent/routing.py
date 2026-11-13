@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import re
 
-from agent.conditions import Finding, Reference, RuleResult
+from agent.conditions import Finding, Reference, RuleResult, has_phrase, words
+from store.plans import SEVERE_THIN_BMI, UNDERWEIGHT_BMI
 
 # The clinic's own vital flags (ELEVATED and LOW don't count as "not under control").
 _BP_FLAG = re.compile(r"^BP_(SYS|DIA)_(HIGH|CRITICAL)$")
@@ -28,6 +29,36 @@ ASTHMA_SPO2_BELOW = 94
 DIZZINESS = "Dizziness"
 DIZZINESS_STOP_AGE = 60
 DIZZINESS_STOP_CODES = {"bp_controlled", "high_bp", "diabetes_controlled", "diabetes", "heart_condition"}
+# Low BP (2026-11-13, provisional; QUESTIONS_FOR_DOCTOR.md 5.4): a reading
+# below 90/60 limits the plan (data/reading_rules.csv); the clinic's LOW
+# flags and a "hypotension" diagnosis are concerns the doctor sees.
+_BP_LOW_FLAG = re.compile(r"^BP_(SYS|DIA)_LOW$")
+_LOW_BP_WORDS = [words(p) for p in ("hypotension", "low bp", "low blood pressure")]
+
+
+def _low_bp_concerns(context: dict) -> list[str]:
+    out = [f"Clinic flagged low BP: {f['code']} on {f['date']}" + (f" ({f['value']})" if f.get("value") else "")
+           + ". Check for dizziness on standing." for f in context["vital_flags"] if _BP_LOW_FLAG.match(f["code"])]
+    for v in context["visits"]:
+        for field, text in (("diagnosis", " / ".join(filter(None, (v.get("diagnosis_confirmed"),
+                                                                   v.get("diagnosis_provisional"))))),
+                            ("complaint", v.get("complaint") or "")):
+            if text and any(has_phrase(words(text), p) for p in _LOW_BP_WORDS):
+                out.append(f"Low BP in the {field} on {v['date']}: \"{text.strip()}\". Check for dizziness on standing.")
+    return out
+
+
+def _underweight(context: dict) -> tuple[list[str], list[str]]:
+    """(severe reasons, concerns) from a low BMI."""
+    body = context.get("body") or {}
+    bmi = body.get("bmi")
+    if bmi is None or bmi >= UNDERWEIGHT_BMI:
+        return [], []
+    measured = f" (measured {body['measured_on']})" if body.get("measured_on") else ""
+    if bmi < SEVERE_THIN_BMI:
+        return [f"BMI {bmi}{measured} is below {SEVERE_THIN_BMI:g} (severe thinness): a doctor writes the plan "
+                "(provisional rule)"], []
+    return [], [f"Underweight: BMI {bmi}{measured}. Check for weight loss or illness (provisional rule)."]
 
 
 # With no reading, the safety decision stays "controlled" (BP's cautious
@@ -170,6 +201,9 @@ def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
                             "Please check it has passed.")
         else:
             reasons.append(line)
+    thin_reasons, thin_concerns = _underweight(context)
+    reasons += thin_reasons
+    concerns += thin_concerns + _low_bp_concerns(context)
     if ai is None and not conditions:
         reasons.append("Assessment incomplete: the AI was unavailable and the rules found no condition")
     if ai is not None and ai["severity"] == "severe":

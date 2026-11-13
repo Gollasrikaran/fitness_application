@@ -3,6 +3,8 @@ bp,140-159/90-99,sys>=140 or dia>=90,block,exercise_type,isometric,"Holding exer
 bp,140-159/90-99,sys>=140 or dia>=90,block,intensity,vigorous,"Vigorous exercise left out at BP {reading}: moderate effort only."
 bp,160-179/100-109,sys>=160 or dia>=100,allow_only,exercise_type,aerobic|balance|breathing|mobility,"At BP {reading}: walking-type, balance, breathing and gentle mobility only."
 bp,180/110 or above,sys>=180 or dia>=110,allow_only,exercise_type,,"BP {reading} is 180/110 or above: no exercise plan; a doctor decides."
+bp,below 90/60,sys<90 or dia<60,block,position,floor,"BP {reading} is low: floor exercises left out (getting up from the floor drops BP most). Rise slowly and drink water."
+bp,below 90/60,sys<90 or dia<60,block,intensity,vigorous,"BP {reading} is low: vigorous exercise left out."
 sugar,250-299 mg/dL,high>=250,block,intensity,vigorous,"Vigorous exercise left out at sugar {reading}: moderate effort only."
 sugar,300 mg/dL or above,high>=300,allow_only,exercise_type,,"Sugar {reading} is 300 mg/dL or above: no exercise plan; a doctor decides."
 sugar,below 70 mg/dL,low<70,allow_only,exercise_type,,"Sugar {reading} is below 70 mg/dL (low sugar): no exercise plan; a doctor decides."

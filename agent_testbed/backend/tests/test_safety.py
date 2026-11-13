@@ -266,3 +266,26 @@ def test_no_age_and_no_risk_codes_means_a_concern(ref):
     # The database source always has an age; without one, the conditions alone decide.
     out = assess(context(visits=[visit("2026-10-20", complaint="dizziness")]), ref)
     assert not any(r.startswith("Dizziness") for r in out["severe_reasons"]) and out["concerns"]
+
+
+# ── Kidney disease written in a diagnosis (7673431d, 2026-11-13) ────────────
+
+@pytest.mark.parametrize("diagnosis", ["CKD/ HTN", "HT with CKD", "Chronic kidney disease stage 3",
+                                       "kidney disease", "Acute renal failure"])
+def test_kidney_disease_in_a_diagnosis_needs_a_doctor(db, diagnosis):
+    """The real alias file: CKD only matched the recorded-condition name before."""
+    from store.seed import _aliases, _from_csv
+    real = load_reference(db)
+    real.aliases = [ConditionAlias(**a) for a in _aliases(_from_csv()[0])]
+    real.warnings = []
+    out = assess(context(visits=[visit("2026-10-08", diagnosis=diagnosis)]), real)
+    assert "other_unlisted" in out["codes"] and out["severity"] == "severe"
+
+
+def test_kidney_stone_is_not_kidney_disease(db):
+    from store.seed import _aliases, _from_csv
+    real = load_reference(db)
+    real.aliases = [ConditionAlias(**a) for a in _aliases(_from_csv()[0])]
+    real.warnings = []
+    out = rule_findings(context(visits=[visit("2026-10-08", diagnosis="Renal calculi, kidney stone")]), real, TODAY)
+    assert "other_unlisted" not in {f.code for f in out.findings}

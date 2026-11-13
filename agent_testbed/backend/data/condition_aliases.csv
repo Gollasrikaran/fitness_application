@@ -146,3 +146,7 @@ text,coad,copd,
 text,chronic bronchitis,copd,
 text,emphysema,copd,
 text,chronic obstructive,copd,
+text,ckd,other_unlisted,kidney disease (serious illness): doctor decides
+text,chronic kidney disease,other_unlisted,kidney disease (serious illness): doctor decides
+text,kidney disease,other_unlisted,kidney disease (serious illness): doctor decides
+text,renal failure,other_unlisted,kidney disease (serious illness): doctor decides
