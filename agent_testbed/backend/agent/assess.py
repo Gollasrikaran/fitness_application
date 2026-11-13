@@ -24,7 +24,7 @@ from typing import Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from agent.conditions import Finding, RuleResult, has_phrase, load_reference, rule_findings, words
+from agent.conditions import Finding, RuleResult, has_phrase, is_recent, load_reference, rule_findings, words
 from agent.llm import MODEL, chat_model
 from agent.prompts import ASSESS
 from agent.routing import finalize
@@ -79,7 +79,10 @@ def _ask_ai(record: dict, ref, rules: RuleResult, today: date) -> AIAssessment:
              "asthma_any": "asthma (controlled or not: decided by the rules)"}
     found = "\n".join(sorted({f"- {shown.get(f.code, f.code)}: {f.where}: \"{f.quote}\""
                               for f in rules.findings})) or "- nothing"
-    prompt = ASSESS.format(today=today.isoformat(), conditions=conditions, found=found)
+    windows = ", ".join(f"{code} {days}" for (code, src), days in sorted(ref.windows.items())
+                        if src == "diagnosis" and days) or "none"
+    prompt = ASSESS.format(today=today.isoformat(), conditions=conditions, found=found, windows=windows,
+                           complaint_days=ref.complaint_days())
     model = chat_model(temperature=0, max_tokens=1500).with_structured_output(AIAssessment)
     return model.invoke([SystemMessage(content=prompt),
                          HumanMessage(content="PATIENT_RECORD\n" + json.dumps(record, ensure_ascii=False, default=str))])
@@ -92,10 +95,23 @@ _SAYS_UNCONTROLLED = re.compile(r"uncontrol|not (under )?control|poor(ly)? contr
                                 re.I)
 
 
-def _check(ai: AIAssessment, ref, record: dict) -> tuple[list[Finding], list[dict], list[str]]:
+_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _too_old(f: AIFinding, ref, today: date | None) -> int | None:
+    """The time window (days) an AI finding is older than, by the visit date
+    in its `where`; None when it counts (no window, no date, or recent)."""
+    if today is None or not (m := _DATE.search(f.where)):
+        return None
+    days = ref.complaint_days(f.code) if "complaint" in f.where.lower() else ref.diagnosis_days(f.code)
+    return days if days is not None and not is_recent(m[0], today, days) else None
+
+
+def _check(ai: AIAssessment, ref, record: dict, today: date | None = None) -> tuple[list[Finding], list[dict], list[str]]:
     """Keep AI findings with a known code and a quote that is really in the
-    record. Returns (kept, dropped, concerns): an AI "not listed" finding
-    becomes a concern for the doctor, not a reason on its own to stop the plan."""
+    record, within the code's time window (data/time_windows.csv). Returns
+    (kept, dropped, concerns): an AI "not listed" finding becomes a concern
+    for the doctor, not a reason on its own to stop the plan."""
     record_words = words(" | ".join(_strings(record)))
     kept, dropped, concerns = [], [], []
     for f in ai.conditions:
@@ -104,6 +120,8 @@ def _check(ai: AIAssessment, ref, record: dict) -> tuple[list[Finding], list[dic
             dropped.append({**f.model_dump(), "why": "not a code in the reference list"})
         elif not has_phrase(record_words, words(f.quote)):
             dropped.append({**f.model_dump(), "why": "quote not found in the record"})
+        elif (days := _too_old(f, ref, today)) is not None:
+            dropped.append({**f.model_dump(), "why": f"older than its {days}-day time window"})
         elif f.code == "other_unlisted":
             concerns.append(f"Not in our exercise list: \"{f.quote}\" ({f.where})")
         else:
@@ -131,13 +149,14 @@ def run_assessment(patient_id: str, doctor_id: str, today: date | None = None,
     rules = rule_findings(context, ref, today)
     record = _record(context)
 
-    readings = plan_store.latest_readings(context["vitals_recent"], today, reading_days)
+    windows = {m: ref.windows.get((m, "reading")) or d for m, d in plan_store.READING_WINDOWS.items()}
+    readings = plan_store.latest_readings(context["vitals_recent"], today, reading_days, windows)
 
 
     ai, ai_findings, dropped, unlisted = None, [], [], []
     try:
         answer = _ask_ai(record, ref, rules, today)
-        ai_findings, dropped, unlisted = _check(answer, ref, record)
+        ai_findings, dropped, unlisted = _check(answer, ref, record, today)
         ai = answer.model_dump()
     except Exception as exc:  # the rules' result stands on its own
         log.error("Assessment AI call failed for patient %s: %s", patient_id, exc)
@@ -151,7 +170,7 @@ def run_assessment(patient_id: str, doctor_id: str, today: date | None = None,
             concerns=[*result["concerns"], *(ai or {}).get("concerns", []), *unlisted], missing=_drop_known_missing((ai or {}).get("missing", []), readings),
             unmapped=rules.unmapped, warnings=rules.warnings, ai_status="ok" if ai else "failed",
             ai_output=ai, dropped=dropped, model=MODEL,
-            readings={**readings, "days": reading_days})
+            readings={**readings, "days": reading_days, "windows": windows})
         db.add(saved)
         db.flush()
         return assessment_store.assessment_dict(saved, full=True)

@@ -116,6 +116,19 @@ class WarningComplaint(Base):
     label: Mapped[str] = mapped_column(String(64))
 
 
+class TimeWindow(Base):
+    """How long a finding counts (data/time_windows.csv).
+
+    what: a condition code, "any" (every condition found from a complaint) or
+    "warning" (warning complaints). counts_from: diagnosis | complaint.
+    days: empty means no limit."""
+    __tablename__ = "time_windows"
+    what: Mapped[str] = mapped_column(String(64), primary_key=True)
+    counts_from: Mapped[str] = mapped_column(String(16), primary_key=True)
+    days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+
+
 # ── The agent's own data ────────────────────────────────────────────────────
 
 class Assessment(Base):

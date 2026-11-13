@@ -108,10 +108,14 @@ function readingsText(readings) {
   const seen = known
     .filter((k) => readings[k])
     .map((k) => `${READING[k][0]} ${READING[k][1](readings[k])} (${readings[k].date}${readings[k].older ? ", older reading" : ""})`);
-  const none = known.filter((k) => !readings[k]).map((k) => READING[k][0]);
   const window = (READING_DAYS.find(([d]) => d === readings.days) || READING_DAYS[0])[1];
   const extra = readings.days > 90 ? ` (older readings included by the doctor: ${window})` : "";
-  return [...seen, none.length && `none in the ${window} for ${none.join(", ")}`].filter(Boolean).join(" · ") + extra;
+  const missing = known.filter((k) => !readings[k]);
+  // Each reading has its own window (SpO2 30 days, Hb 180…); older assessments have one for all.
+  const none = readings.windows
+    ? missing.length && `none recent for ${missing.map((k) => `${READING[k][0]} (${readings.windows[k]} days)`).join(", ")}`
+    : missing.length && `none in the ${window} for ${missing.map((k) => READING[k][0]).join(", ")}`;
+  return [...seen, none].filter(Boolean).join(" · ") + extra;
 }
 
 function AssessmentView({ a }) {

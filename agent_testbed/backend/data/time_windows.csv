@@ -1,0 +1,12 @@
+what,counts_from,days,note
+acute_injury,diagnosis,90,"POC value (2026-11-13). Soft tissue heals in about 6 weeks and keeps remodelling for months; bad sprains take 8-12 weeks. To confirm with the doctor."
+recent_surgery,diagnosis,90,"POC value (2026-11-13). Light activity from about 6 weeks, heavy and core work from about 12 weeks after major surgery. To confirm with the doctor."
+pregnancy,diagnosis,365,"POC value (2026-11-13). Covers the rest of the pregnancy after an early diagnosis plus about 12 weeks after the birth. To confirm with the doctor."
+sprain_strain,diagnosis,90,"POC value (2026-11-13). Most sprains settle in 1-6 weeks, bad ones 8-12 weeks. To confirm with the doctor."
+any,complaint,183,"Default for every condition found from a complaint (about 6 months; as before)."
+warning,complaint,183,"Warning complaints such as chest pain or dizziness (about 6 months; as before)."
+bp,reading,90,"POC value (2026-11-13). BP changes over weeks. A vital or a lab result alike. To confirm with the doctor."
+sugar,reading,90,"POC value (2026-11-13). Sugar changes over days and weeks (was 180 for a lab result). To confirm with the doctor."
+hb,reading,180,"POC value (2026-11-13). Hb changes slowly, over months. To confirm with the doctor."
+spo2,reading,30,"POC value (2026-11-13). SpO2 changes within days (a fever or cold lowers it). To confirm with the doctor."
+pulse,reading,30,"POC value (2026-11-13). Resting pulse changes within days (fever, pain). To confirm with the doctor."

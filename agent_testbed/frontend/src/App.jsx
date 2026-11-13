@@ -429,7 +429,7 @@ function ContextPanel({ patientId }) {
       <VisitHistory patientId={patientId} />
 
       <Section title="Recent vitals" empty="No vitals recorded">
-        {vitals_recent.length > 0 && <VitalsTable rows={vitals_recent} />}
+        {vitals_recent.length > 0 && <VitalsTable rows={vitals_recent.slice(0, 10)} />}
       </Section>
 
       <Section title="Care">

@@ -19,7 +19,7 @@ from sqlalchemy import text
 
 from store import reference
 from store.db import SCHEMA, Base, engine, session
-from store.models import Condition, ConditionAlias, Exercise, ReadingRule, SafetyRule, WarningComplaint
+from store.models import Condition, ConditionAlias, Exercise, ReadingRule, SafetyRule, TimeWindow, WarningComplaint
 
 log = logging.getLogger("store.seed")
 
@@ -55,7 +55,7 @@ def init_store() -> None:
     with engine.begin() as conn:
         conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
     # Reference tables are rebuilt from their sources, so their columns follow the models.
-    for model in (SafetyRule, ReadingRule, ConditionAlias, WarningComplaint, Exercise, Condition):
+    for model in (SafetyRule, ReadingRule, ConditionAlias, WarningComplaint, TimeWindow, Exercise, Condition):
         model.__table__.drop(engine, checkfirst=True)
     Base.metadata.create_all(engine)
     with engine.begin() as conn:
@@ -76,6 +76,7 @@ def init_store() -> None:
         db.add_all(WarningComplaint(phrase=r["phrase"].strip().lower(), label=r["label"])
                    for r in _rows("warning_complaints.csv"))
         db.add_all(ReadingRule(**r) for r in reading_rules())
+        db.add_all(TimeWindow(**w) for w in time_windows(conditions))
 
 
 # Allowed values of the exercise properties the reading rules select on.
@@ -127,6 +128,24 @@ def reading_rules() -> list[dict]:
 
 # Not condition codes: the safety rules decide controlled or not (agent/conditions.py).
 ALIAS_MARKERS = {"bp_any", "diabetes_any", "asthma_any"}
+
+
+def time_windows(conditions: dict) -> list[dict]:
+    """data/time_windows.csv, minus rows with an unknown condition, reading or
+    source, or days that aren't a whole number. Empty days: no limit (for a
+    reading: the default in store.plans.READING_WINDOWS)."""
+    out = []
+    for r in _rows("time_windows.csv"):
+        what, counts_from, days = r["what"].strip(), r["counts_from"].strip(), (r["days"] or "").strip()
+        known = what in READING_FIELDS if counts_from == "reading" else (
+            counts_from in ("diagnosis", "complaint") and (what in conditions or what in ("any", "warning")))
+        if not known or (days and not days.isdigit()):
+            log.warning("Time window %r dropped: unknown condition, source or days", r)
+            continue
+        out.append({"what": what, "counts_from": counts_from, "days": int(days) if days else None,
+                    "note": r.get("note") or ""})
+    log.info("Time windows loaded: %d", len(out))
+    return out
 
 
 def _aliases(conditions: dict) -> list[dict]:

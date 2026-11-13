@@ -244,7 +244,7 @@ def _visits(summary: dict, timeline: str, names: dict[str, str],
             for k, v in readings.items():
                 if k not in vitals:  # a reading taken at the visit wins
                     vitals[k] = v
-                    vitals.setdefault("from_lab", []).append(k)  # counts for longer (store.plans)
+                    vitals.setdefault("from_lab", []).append(k)  # where it came from (same window as a vital)
 
     visits = []
     for e in entries:
@@ -295,9 +295,15 @@ def build_context(summary: dict, timeline: str, doctor_names: dict[str, str] | N
                                   "confirmed": e.get("confirmed")} for e in rx_with_diagnosis],
         },
         "history_other": _answered(history, _HISTORY_OTHER),
-        "vitals_recent": vitals_recent[:RECENT_VISITS],
+        # Every visit's vitals: each reading has its own window (Hb 180 days), which
+        # can reach past the latest 10 visits (store.plans.READING_WINDOWS).
+        "vitals_recent": vitals_recent,
         "vital_flags": flags,
         "visits": visits,
+        # Every visit in the timeline, for the rules only (agent/conditions.py): date,
+        # complaint and diagnoses. The AI and the chat read `visits` (the latest RECENT_VISITS).
+        "visits_all": [{k: v[k] for k in ("date", "complaint", "diagnosis_provisional", "diagnosis_confirmed")
+                        if v.get(k)} for v in _visits(summary, timeline, names, None)[2]],
         "medicines": {"from": entries[0]["date"] if entries else None,
                       "items": [{"name": m} for m in summary.get("ongoing_medicines") or []],
                       "patient_instructions": entries[0].get("instructions") if entries else None,

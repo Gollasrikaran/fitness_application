@@ -50,14 +50,15 @@ MAX_EXERCISES = 5      # in any draft the agent makes
 # others are left out (they repeat it). Marching is walking indoors.
 CORE_AEROBIC = ("walk", "march_in_place", "seated_march")
 
-# Which reading counts (decided 2026-10-28): the latest, if within this many
-# days. A patient with BP and no recent BP reading is treated as 140/90; for
-# the other readings no reading means no rule.
+# Which reading counts: the latest, if within its window. A patient with BP
+# and no recent BP reading is treated as 140/90; for the other readings no
+# reading means no rule.
 READING_DAYS = 90
-# Lab results (from uploaded reports) are taken less often than vitals: they
-# count for longer (decided 2026-11-04). A vitals entry lists the keys that
-# came from a lab report in "from_lab" (app/clinic_api.py).
-LAB_READING_DAYS = 180
+# Each reading's window (2026-11-13, POC; data/time_windows.csv, rows
+# "reading", overrides these): SpO2 and pulse change within days (a fever
+# lowers SpO2 and raises the pulse), BP and sugar over weeks, Hb over months.
+# The same for a vital or a lab result from an uploaded report.
+READING_WINDOWS = {"bp": 90, "sugar": 90, "hb": 180, "spo2": 30, "pulse": 30}
 # The doctor may include older readings when generating a plan. An older
 # reading can only make the plan stricter: the rules only ever rule things
 # out, and an old BP reading counts only if high (else a BP patient keeps
@@ -333,19 +334,27 @@ def _age(v: dict, today: date) -> int:
     return (today - date.fromisoformat(str(v["date"])[:10])).days
 
 
-def _dated(reading: dict, v: dict, today: date) -> dict:
-    """The reading with its date, marked "older" when past READING_DAYS (an
-    older reading the doctor included, or a lab result)."""
+def _dated(reading: dict, v: dict, today: date, window: int) -> dict:
+    """The reading with its date, marked "older" when past its own window
+    (an older reading the doctor included)."""
     out = {**reading, "date": str(v["date"])[:10]}
-    if _age(v, today) > READING_DAYS:
+    if _age(v, today) > window:
         out["older"] = True
     return out
 
 
-def latest_bp(vitals: list[dict], today: date, days: int = READING_DAYS) -> dict | None:
-    """The newest BP reading in the visits (newest first), if taken in the
-    last READING_DAYS days: {"sys", "dia", "date"}. With older readings
-    included (days > READING_DAYS), an older one counts only if high."""
+def _window(metric: str, days: int, windows: dict | None) -> tuple[int, int]:
+    """(the metric's own window, how far back to look): the doctor's choice
+    above READING_DAYS can only lengthen it."""
+    own = (windows or {}).get(metric) or READING_WINDOWS[metric]
+    return own, max(own, days) if days > READING_DAYS else own
+
+
+def latest_bp(vitals: list[dict], today: date, days: int = READING_DAYS, windows: dict | None = None) -> dict | None:
+    """The newest BP reading in the visits (newest first), if within BP's
+    window: {"sys", "dia", "date"}. With older readings included (days >
+    READING_DAYS), an older one counts only if high."""
+    own, look_back = _window("bp", days, windows)
     for v in vitals:
         sys_, dia = _reading(v.get("bp_sys")), _reading(v.get("bp_dia"))
         if sys_ is None or dia is None:
@@ -354,36 +363,39 @@ def latest_bp(vitals: list[dict], today: date, days: int = READING_DAYS) -> dict
         if sys_ and dia and v.get("date"):
             age = _age(v, today)
             high = sys_ >= ASSUMED_BP["sys"] or dia >= ASSUMED_BP["dia"]
-            if age <= READING_DAYS or (age <= days and high):
-                return _dated({"sys": sys_, "dia": dia}, v, today)
+            if age <= own or (age <= look_back and high):
+                return _dated({"sys": sys_, "dia": dia}, v, today, own)
             return None
     return None
 
 
-def _latest_value(vitals: list[dict], today: date, metric: str, days: int = READING_DAYS) -> dict | None:
-    """The newest plausible reading of one metric, if within the window
-    (`days`, or LAB_READING_DAYS for a lab result): {"value", "date"}; for
-    sugar {"high", "low", "date"} (a visit can have a fasting and a random
-    sugar: the rules test the highest and the lowest)."""
+def _latest_value(vitals: list[dict], today: date, metric: str, days: int = READING_DAYS,
+                  windows: dict | None = None) -> dict | None:
+    """The newest plausible reading of one metric, if within its window (a
+    vital or a lab result alike): {"value", "date"}; for sugar {"high",
+    "low", "date"} (a visit can have a fasting and a random sugar: the rules
+    test the highest and the lowest)."""
+    own, look_back = _window(metric, days, windows)
     lo, hi = _PLAUSIBLE[metric]
     for v in vitals:
         keys = [k for k in _VITAL_KEYS[metric] if (x := _reading(v.get(k))) is not None and lo <= x <= hi]
         if keys and v.get("date"):
-            from_lab = all(k in (v.get("from_lab") or ()) for k in keys)
-            if _age(v, today) > max(days, LAB_READING_DAYS if from_lab else 0):
+            if _age(v, today) > look_back:
                 return None
             values = [_reading(v[k]) for k in keys]
             if metric == "sugar":
-                return _dated({"high": max(values), "low": min(values)}, v, today)
-            return _dated({"value": values[0]}, v, today)
+                return _dated({"high": max(values), "low": min(values)}, v, today, own)
+            return _dated({"value": values[0]}, v, today, own)
     return None
 
 
-def latest_readings(vitals: list[dict], today: date, days: int = READING_DAYS) -> dict:
+def latest_readings(vitals: list[dict], today: date, days: int = READING_DAYS, windows: dict | None = None) -> dict:
     """The readings the rules test, from the visits' vitals (newest first):
-    {"bp", "sugar", "hb", "spo2", "pulse"}, each None without one in the
-    window. `days` above READING_DAYS: the doctor included older readings."""
-    return {"bp": latest_bp(vitals, today, days), **{m: _latest_value(vitals, today, m, days) for m in _VITAL_KEYS}}
+    {"bp", "sugar", "hb", "spo2", "pulse"}, each None without one in its
+    window (`windows`, else READING_WINDOWS). `days` above READING_DAYS: the
+    doctor included older readings."""
+    return {"bp": latest_bp(vitals, today, days, windows),
+            **{m: _latest_value(vitals, today, m, days, windows) for m in _VITAL_KEYS}}
 
 
 def reading_text(metric: str, r: dict) -> str:

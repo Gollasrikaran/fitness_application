@@ -180,7 +180,8 @@ def test_latest_readings_skip_typing_errors_and_old_visits():
               {"date": date(2026, 10, 1), "spo2": 96},
               {"date": date(2026, 6, 1), "pulse": 70, "hb": 9}]
     out = plans.latest_readings(vitals, TODAY)
-    assert out["spo2"] == one(96, "2026-10-01") and out["pulse"] is None and out["hb"] is None
+    # Hb counts for 180 days (2026-11-13): 149 days old is still in its window.
+    assert out["spo2"] == one(96, "2026-10-01") and out["pulse"] is None and out["hb"] == one(9, "2026-06-01")
 
 
 def test_normal_readings_change_nothing(db):
@@ -242,11 +243,39 @@ def test_bad_conditions_are_refused(when, metric):
 # ── Older readings (decided 2026-11-04): lab results count for 6 months; the
 # doctor may include older readings, which can only make the plan stricter ──
 
-def test_a_lab_result_counts_for_six_months_a_vital_for_ninety_days():
+def test_hb_counts_for_six_months_pulse_for_thirty_days():
+    """Each reading has its own window (2026-11-13): Hb 180 days, pulse 30."""
     vitals = [{"date": date(2026, 6, 1), "hb": 6.0, "pulse": 80, "from_lab": ["hb"]}]  # 149 days old
     out = plans.latest_readings(vitals, TODAY)
-    assert out["hb"] == {"value": 6.0, "date": "2026-06-01", "older": True} and out["pulse"] is None
+    assert out["hb"] == {"value": 6.0, "date": "2026-06-01"} and out["pulse"] is None
     assert plans.latest_readings(vitals, date(2026, 12, 15))["hb"] is None  # 197 days: too old
+
+
+@pytest.mark.parametrize("metric, key, value, inside, outside", [
+    ("spo2", "spo2", 91, 30, 31), ("pulse", "pulse", 112, 30, 31),
+    ("bp", "bp", "150/95", 90, 91), ("sugar", "sugar_mg_dl", 310, 90, 91), ("hb", "hb", 7.5, 180, 181)])
+def test_each_reading_has_its_own_window(metric, key, value, inside, outside):
+    from datetime import timedelta
+    for age, counts in ((inside, True), (outside, False)):
+        vitals = [{"date": TODAY - timedelta(days=age), key: value}]
+        assert (plans.latest_readings(vitals, TODAY)[metric] is not None) == counts, (metric, age)
+
+
+def test_a_lab_sugar_counts_like_a_vital_one():
+    vitals = [{"date": date(2026, 7, 1), "sugar_mg_dl": 320, "from_lab": ["sugar_mg_dl"]}]  # 119 days old
+    assert plans.latest_readings(vitals, TODAY)["sugar"] is None
+
+
+def test_windows_from_the_csv_override_the_defaults():
+    vitals = [{"date": date(2026, 9, 1), "spo2": 90}]  # 57 days old
+    assert plans.latest_readings(vitals, TODAY)["spo2"] is None
+    assert plans.latest_readings(vitals, TODAY, windows={"spo2": 60})["spo2"] == one(90, "2026-09-01")
+
+
+def test_the_csv_has_a_window_for_every_reading():
+    from store.seed import _from_csv, time_windows
+    rows = {r["what"]: r["days"] for r in time_windows(_from_csv()[0]) if r["counts_from"] == "reading"}
+    assert rows == plans.READING_WINDOWS
 
 
 def test_the_doctor_can_include_older_readings():

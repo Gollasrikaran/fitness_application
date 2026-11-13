@@ -204,6 +204,8 @@ def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
     thin_reasons, thin_concerns = _underweight(context)
     reasons += thin_reasons
     concerns += thin_concerns + _low_bp_concerns(context)
+    # Left out as older than their time window (data/time_windows.csv): the doctor still sees them.
+    concerns += [f"Not counted, too old: {line}" for line in rules.expired]
     if ai is None and not conditions:
         reasons.append("Assessment incomplete: the AI was unavailable and the rules found no condition")
     if ai is not None and ai["severity"] == "severe":

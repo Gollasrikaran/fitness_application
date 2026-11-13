@@ -205,7 +205,8 @@ def test_low_hb_from_a_lab_report_reaches_the_reading_rules():
 # ── The record ──────────────────────────────────────────────────────────────
 
 def test_record_has_the_same_shape_as_the_database_one(ctx):
-    assert set(ctx) == DB_KEYS | {"clinical_summary", "labs"}
+    # visits_all: every timeline visit, for the rules (the database source falls back to `visits`).
+    assert set(ctx) == DB_KEYS | {"clinical_summary", "labs", "visits_all"}
     assert ctx["patient"] == {"id": "p1", "age": 61, "sex": "FEMALE", "language": None, "registered_on": None}
     assert set(ctx["conditions"]) == {"doctor_recorded", "health_history", "long_term_conditions", "recent_diagnoses"}
     assert set(ctx["care"]) >= {"visits", "first_visit", "last_visit", "recent_complaints", "followups",

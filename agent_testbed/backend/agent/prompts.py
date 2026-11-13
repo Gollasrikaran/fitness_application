@@ -54,7 +54,7 @@ Return:
    - quote: words copied exactly from PATIENT_RECORD (a diagnosis, complaint, medicine or condition name). Never paraphrase: a quote not found in the record is thrown away.
    - where: the visit date and field, e.g. "visit 2026-10-10, diagnosis".
    Rules:
-   - Diagnoses count from any visit listed. Chief complaints count only from visits in the last 6 months before TODAY: older ones may have resolved.
+   - Diagnoses count from any visit listed, except these, which count only for a while (days before TODAY): {windows}. Chief complaints count only from visits in the last {complaint_days} days before TODAY: older ones may have resolved. Don't rate a case severe for something older than its window.
    - A complaint with no diagnosis (e.g. "knee pain") maps to the closest code.
    - Medicines can show a condition (e.g. metformin: diabetes; amlodipine or telmisartan: blood pressure).
    - For blood pressure and sugar use bp_controlled / diabetes_controlled. Whether they are under control is decided by the clinic's vital flags, not by you: don't judge it from readings. Use high_bp / diabetes only when a diagnosis or complaint says so (e.g. "uncontrolled DM").
