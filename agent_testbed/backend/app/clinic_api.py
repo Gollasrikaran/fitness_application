@@ -165,29 +165,67 @@ def parse_lab(line: str) -> dict | None:
     return {"name": m[1].strip(), "value": m[2].strip(), "status": m[3].strip() if m[3] else None}
 
 
+# "• Glimperide, dosage 1-0-0, frequency Before food, duration 10 days": every
+# part after the name can be missing ("• Glimipride, dosage 1-0-1").
+_MEDICINE_PARTS = re.compile(r",\s*(dosage|frequency|duration)\s+")
+_MEDICINES_HEADER = re.compile(r"^\s*Medicines\s*[—\-]+\s*Prescription", re.I)
+
+
+def parse_medicine(line: str) -> dict | None:
+    """"• Tab Tendocare, dosage 0-1-0, frequency After food, duration 5 days"
+    -> {"name": "Tab Tendocare", "dosage": "0-1-0", "frequency": "After food",
+    "duration": "5 days"}, the shape app/clinic.py gives (missing parts left out)."""
+    m = re.match(r"^\s*•\s*(.+?)\s*$", line)
+    if not m:
+        return None
+    name, *rest = _MEDICINE_PARTS.split(m[1])
+    medicine = {"name": name.strip()} | {key: value.strip() for key, value in zip(rest[::2], rest[1::2])}
+    return {k: v for k, v in medicine.items() if v} if medicine["name"] else None
+
+
+def latest_prescription(entries: list[dict]) -> tuple[str | None, list[dict]]:
+    """(date, medicines) of the newest visit day that has a prescription.
+    Visits on that day are merged (two departments on one day: both are
+    current), each medicine once. Entries are newest first."""
+    day = next((e["date"] for e in entries if e.get("medicines")), None)
+    seen, items = set(), []
+    for e in entries:
+        if e["date"] == day:
+            for med in e.get("medicines") or []:
+                if med["name"].lower() not in seen:
+                    seen.add(med["name"].lower())
+                    items.append(med)
+    return day, items
+
+
 def parse_timeline(text: str) -> list[dict]:
     """/timeline text -> one entry per visit, in the text's order (not always
     newest first: build_context sorts them):
-    {"date", "visit_id", "complaint", "provisional", "confirmed", "instructions", "labs", "followups"}.
+    {"date", "visit_id", "complaint", "provisional", "confirmed", "instructions", "labs", "followups",
+    "medicines"}.
     A date can hold several visits ("Visit A of 2"); each starts at its VISIT ID.
     A field can run over several unindented lines ("DUB\\nPerimenopause"):
     they are joined with "; ". Lab results come from the visit's documents.
     Follow-ups come from the visit's "Follow-up Schedule" lines
-    ("• 2026-10-01 | MISSED") as {"date", "status"}."""
-    visits, day, current, field, in_labs, in_followups = [], None, None, None, False, False
+    ("• 2026-10-01 | MISSED") as {"date", "status"}. Medicines come from the
+    visit's "Medicines — Prescription" lines (parse_medicine)."""
+    visits, day, current, field, in_labs, in_followups, in_meds = [], None, None, None, False, False, False
     for line in str(text or "").splitlines():
         m = re.match(r"^\s*DATE:\s*(\d{4}-\d{2}-\d{2})", line)
         if m:
-            day, current, field, in_labs, in_followups = m[1], None, None, False, False
+            day, current, field, in_labs, in_followups, in_meds = m[1], None, None, False, False, False
             continue
         m = re.match(r"^\s*VISIT ID:\s*(\S+)", line)
         if m and day:
             current = {"date": day, "visit_id": m[1]}
             visits.append(current)
-            field, in_labs, in_followups = None, False, False
+            field, in_labs, in_followups, in_meds = None, False, False, False
             continue
         if in_followups and current is not None and (m := _FOLLOWUP.match(line)):
             current.setdefault("followups", []).append({"date": m[1], "status": m[2]})
+            continue
+        if in_meds and current is not None and (med := parse_medicine(line)):
+            current.setdefault("medicines", []).append(med)
             continue
         if field and line.strip() and not line[0].isspace() and not re.match(r"^[=\-]+$", line.strip()):
             more = line.strip().strip(",").strip()
@@ -201,6 +239,7 @@ def parse_timeline(text: str) -> list[dict]:
             continue
         in_labs = name.startswith("lab results")
         in_followups = name.startswith("follow-up schedule")
+        in_meds = bool(_MEDICINES_HEADER.match(line))
         field = _FIELDS.get(name) if day else None
         if field:
             if current is None:  # a timeline without VISIT ID lines
@@ -252,7 +291,8 @@ def _visits(summary: dict, timeline: str, names: dict[str, str],
         vitals = {k: v for k, v in by_visit.get(e.get("visit_id"), {}).items() if k not in ("date", "from_lab")}
         visit = {"date": e["date"], "doctor": names.get(m.get("doctor_id")), "complaint": e.get("complaint"),
                  "vitals": vitals, "diagnosis_provisional": e.get("provisional"),
-                 "diagnosis_confirmed": e.get("confirmed"), "patient_instructions": e.get("instructions"),
+                 "diagnosis_confirmed": e.get("confirmed"), "medicines": e.get("medicines"),
+                 "patient_instructions": e.get("instructions"),
                  "labs": e.get("labs"), "emergency": m.get("is_emergency") or None}
         if m.get("is_referral_recommended"):
             visit["referral"] = {"to": m.get("referral_specialist_name"), "for": m.get("referral_treatment_name")}
@@ -282,6 +322,10 @@ def build_context(summary: dict, timeline: str, doctor_names: dict[str, str] | N
     span = [s.strip() for s in str(snap.get("span") or "").split(" to ")]
     history = summary.get("health_history") or {}
     rx_with_diagnosis = [e for e in entries if e.get("provisional") or e.get("confirmed")]
+    # The latest prescription, from the timeline, as app/clinic.py gives it. Not
+    # /summary's ongoing_medicines: it keeps every medicine ever prescribed
+    # (bd8b445c, 2026-11-16: 28 listed, 7 on the latest prescription).
+    rx_date, rx_items = latest_prescription(entries)
     return {
         "patient": {"id": summary.get("patient_id"), "age": summary.get("age_years"), "sex": _sex(summary.get("sex")),
                     "language": None, "registered_on": None},
@@ -304,8 +348,7 @@ def build_context(summary: dict, timeline: str, doctor_names: dict[str, str] | N
         # complaint and diagnoses. The AI and the chat read `visits` (the latest RECENT_VISITS).
         "visits_all": [{k: v[k] for k in ("date", "complaint", "diagnosis_provisional", "diagnosis_confirmed")
                         if v.get(k)} for v in _visits(summary, timeline, names, None)[2]],
-        "medicines": {"from": entries[0]["date"] if entries else None,
-                      "items": [{"name": m} for m in summary.get("ongoing_medicines") or []],
+        "medicines": {"from": rx_date, "items": rx_items,
                       "patient_instructions": entries[0].get("instructions") if entries else None,
                       "follow_up_at": None},
         "care": {"visits": snap.get("encounters"), "first_visit": span[0] or None,
@@ -323,7 +366,9 @@ def build_context(summary: dict, timeline: str, doctor_names: dict[str, str] | N
         "labs": [{"date": e["date"], **lab} for e in entries for lab in e.get("labs") or []],
         "clinical_summary": {"exercise_suitable": summary.get("exercise_suitable"), "patient_type": summary.get("patient_type"),
                 "exercise_reason": summary.get("exercise_reason"),
-                "flags": [{k: f.get(k) for k in ("level", "title", "evidence")}
+                # kind (medication, risk, ...), time (current / past), as_of (latest evidence)
+                # and undated: what the AI is sent is chosen with them (agent.assess.clinic_flags).
+                "flags": [{k: f.get(k) for k in ("level", "title", "evidence", "kind", "time", "as_of", "undated")}
                           for f in snap.get("flags") or [] if f.get("level") in ("high", "medium")]},
         "as_of": today or date.today(),
     }

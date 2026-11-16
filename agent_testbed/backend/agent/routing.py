@@ -139,6 +139,40 @@ def _resolve_asthma(findings: list[Finding], context: dict, rules: RuleResult) -
                    + (f"SpO2 {spo2[0]:g}% on {spo2[1]}" if spo2 else "no SpO2 reading"))]
 
 
+# The AI sometimes names the record's raw fields in `where` ("visit 2026-10-01,
+# diagnosis_provisional"): shown as the rules word them.
+_WHERE_WORDS = {"diagnosis_provisional": "diagnosis", "diagnosis_confirmed": "diagnosis",
+                "recorded_conditions": "doctor recorded", "chief_complaint": "complaint"}
+_WHERE_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _tidy_where(where: str) -> str:
+    return re.sub("|".join(_WHERE_WORDS), lambda m: _WHERE_WORDS[m[0]], where)
+
+
+def _field(where: str) -> str:
+    """"visit 2026-10-01, complaint" -> "complaint"; "" when no visit field is named."""
+    m = re.search(r"\b(complaint|diagnosis|medicines?)\b", where, re.I)
+    return m[1].lower().rstrip("s") if m else ""
+
+
+def _same_evidence(where: str, quote: str, other_where: str, other_quote: str) -> bool:
+    """The same fact said twice (the rules found it, then the AI): the same
+    date (or both undated) and one quote inside the other. E.g. "BMI measured
+    2026-10-01" and "measured on 2026-10-01", both "BMI 30.8"; or the AI
+    quoting part of a complaint the rules quoted whole."""
+    d1, d2 = _WHERE_DATE.search(where), _WHERE_DATE.search(other_where)
+    if (d1 and d1[0]) != (d2 and d2[0]):
+        return False
+    if _field(where) != _field(other_where):  # a complaint never repeats a diagnosis
+        return False
+    if not d1 and where.lower() != other_where.lower():
+        return False
+    # Word by word, as the quote check reads them: "HTN,DM" and "HTN-DM" are the same words.
+    a, b = words(quote), words(other_quote)
+    return bool(a and b) and (has_phrase(a, b) or has_phrase(b, a))
+
+
 def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
              ai_findings: list[Finding]) -> dict:
     findings = [*rules.findings, *ai_findings]
@@ -175,15 +209,21 @@ def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
                                         "complaint_only": True, "evidence": []})
         g["found_by"].add(f.found_by)
         g["complaint_only"] &= f.complaint_only
-        line = f"{f.where}: \"{f.quote}\""
-        if line not in g["evidence"]:
-            g["evidence"].append(line)
+        where = _tidy_where(f.where)
+        seen = g.setdefault("_seen", [])
+        # Only the AI's repeat of a line is dropped: every rules line is kept.
+        if f.found_by == "rules" or not any(_same_evidence(where, f.quote, w, q) for w, q in seen):
+            seen.append((where, f.quote))
+            line = f"{where}: \"{f.quote}\""
+            if line not in g["evidence"]:
+                g["evidence"].append(line)
     for code, note in flag_notes:
         if code in grouped:
             grouped[code]["evidence"].append(note)
     conditions = sorted(grouped.values(), key=lambda g: (g["bucket"] != "refer", g["code"]))
     for g in conditions:
         g["found_by"] = " + ".join(sorted(g["found_by"]))
+        g.pop("_seen", None)
 
     reasons = [f"{g['name']} ({g['code']}) needs a doctor" for g in conditions if g["bucket"] == "refer"]
     reasons += [f"Critical vital: {f['code']} = {f['value']} on {f['date']}"

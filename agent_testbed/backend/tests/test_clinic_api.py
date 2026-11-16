@@ -226,9 +226,84 @@ def test_record_values(ctx):
     assert ctx["alerts"]["emergencies"] == [{"date": "2026-03-02", "diagnosis": "Acute febrile illness"}]
     assert ctx["alerts"]["referrals"] == [{"date": "2026-10-20", "to": "Ortho", "for": "knee"}]
     assert ctx["care"]["visits"] == 3 and ctx["care"]["first_visit"] == "2026-03-02"
-    assert ctx["medicines"]["items"] == [{"name": "Inh Foracort"}, {"name": "Amlodipine 5"}]
+    # No prescription lines in the timeline: none, not /summary's ongoing_medicines.
+    assert ctx["medicines"]["items"] == [] and ctx["medicines"]["from"] is None
     assert ctx["clinical_summary"] == {"exercise_suitable": False, "patient_type": "Cardiovascular",
-                          "exercise_reason": None, "flags": [{"level": "medium", "title": "Recurring respiratory symptoms", "evidence": "x"}]}
+                          "exercise_reason": None, "flags": [{"level": "medium", "title": "Recurring respiratory symptoms", "evidence": "x",
+                                                              "kind": None, "time": None, "as_of": None, "undated": None}]}
+
+
+# bd8b445c (2026-11-16): /summary's ongoing_medicines listed 28 medicines,
+# Amlodipine and NSAIDs long stopped among them; the latest prescription had 7.
+MEDICINE_TIMELINE = """PATIENT ID: p5
+DATE: 2026-10-01
+  VISIT ID: v4
+  Chief Complaint (database): K/C/o-HTN,DM, report check
+  Medicines — Prescription (database):
+    • Glimperide, dosage 1-0-0, frequency Before food, duration 10 days
+    • Telmisartan, dosage 1-0-0, frequency After food, duration 10 days
+  Supporting Document: NONE — no document was uploaded/extracted for this visit.
+  Follow-up Schedule (1 scheduled | 0 completed | 1 missed):
+    • 2026-10-11 | MISSED
+DATE: 2026-09-28
+  Visit A of 2
+  VISIT ID: v3
+  Chief Complaint (database): general weakness
+  Medicines — Prescription (database):
+    • Amlodipine, dosage 1-0-0, frequency After food, duration 10 days
+    • Telmisartan, dosage 1-0-0
+  Visit B of 2
+  VISIT ID: v2
+  Chief Complaint (database): neck pain
+  Medicines — Prescription (database): none recorded
+DATE: 2026-08-27
+  VISIT ID: v1
+  Medicines — Prescription (database):
+    • Glimipride, dosage 1-0-1
+    • low salt diet, dosage 1-0-1, frequency After food
+    • Metformin, dosage 1-0-1, duration 30 days
+"""
+
+
+@pytest.mark.parametrize("line, out", [
+    ("    • Tab Tendocare, dosage 0-1-0, frequency After food, duration 5 days",
+     {"name": "Tab Tendocare", "dosage": "0-1-0", "frequency": "After food", "duration": "5 days"}),
+    ("      • Metformin, dosage 1-0-1, duration 30 days", {"name": "Metformin", "dosage": "1-0-1", "duration": "30 days"}),
+    ("      • Glimipride, dosage 1-0-1", {"name": "Glimipride", "dosage": "1-0-1"}),
+    ("      • Calcium Carbonate Tab + vit D3 1.25 gm, dosage 0-1-0",
+     {"name": "Calcium Carbonate Tab + vit D3 1.25 gm", "dosage": "0-1-0"}),
+    ("      • Pan", {"name": "Pan"}),
+    ("  Chief Complaint (database): fever", None)])
+def test_medicine_lines_are_parsed(line, out):
+    assert clinic_api.parse_medicine(line) == out
+
+
+def test_each_visit_has_its_own_prescription():
+    visits = clinic_api.parse_timeline(MEDICINE_TIMELINE)
+    assert [m["name"] for m in visits[0]["medicines"]] == ["Glimperide", "Telmisartan"]
+    assert visits[0]["followups"] == [{"date": "2026-10-11", "status": "MISSED"}]  # not a medicine
+    assert "medicines" not in visits[2]  # "none recorded"
+    assert [m["name"] for m in visits[3]["medicines"]] == ["Glimipride", "low salt diet", "Metformin"]
+    assert "labs" not in visits[0] and "labs" not in visits[3]
+
+
+def test_current_medicines_are_the_latest_prescription_not_every_medicine_ever():
+    summary = {**SUMMARY, "visits": [], "ongoing_medicines": ["Amlodipine", "Nucoxia", "Tramadol", "Glimperide"]}
+    ctx = clinic_api.build_context(summary, MEDICINE_TIMELINE, {}, TODAY)
+    assert ctx["medicines"]["from"] == "2026-10-01"
+    assert ctx["medicines"]["items"] == [
+        {"name": "Glimperide", "dosage": "1-0-0", "frequency": "Before food", "duration": "10 days"},
+        {"name": "Telmisartan", "dosage": "1-0-0", "frequency": "After food", "duration": "10 days"}]
+    assert [m["name"] for m in ctx["visits"][1]["medicines"]] == ["Amlodipine", "Telmisartan"]  # visit history
+
+
+def test_two_visits_on_the_latest_day_give_one_prescription():
+    """Two departments on one day: both prescriptions are current, each medicine once."""
+    entries = sorted(clinic_api.parse_timeline(MEDICINE_TIMELINE)[1:], key=lambda e: e["date"], reverse=True)
+    day, items = clinic_api.latest_prescription(entries)
+    assert day == "2026-09-28"
+    assert items == [{"name": "Amlodipine", "dosage": "1-0-0", "frequency": "After food", "duration": "10 days"},
+                     {"name": "Telmisartan", "dosage": "1-0-0"}]
 
 
 def test_readings_rules_can_read_the_api_vitals(ctx):
@@ -374,10 +449,14 @@ def test_visits_are_newest_first_even_when_the_timeline_lists_the_oldest_first()
   VISIT ID: v1
   Chief Complaint (database): breathing problem while walking
   Prescription Instructions (database): Old case of HT, DM
+  Medicines — Prescription (database):
+    • Amlodipine, dosage 1-0-0
 DATE: 2026-09-21
   VISIT ID: v2
   Chief Complaint (database): Follow up
   Prescription Instructions (database): Investigation --normal, BP --118/75
+  Medicines — Prescription (database):
+    • Telmisartan, dosage 1-0-0
 """
     summary = {"patient_id": "p8", "age_years": 65, "sex": "FEMALE",
                "visits": [{"visit_id": "v1", "visit_date": "2026-09-15", "doctor_id": "d1"},
@@ -387,6 +466,7 @@ DATE: 2026-09-21
     ctx = clinic_api.build_context(summary, timeline, {}, TODAY)
     assert [v["date"] for v in ctx["visits"]] == ["2026-09-21", "2026-09-15"]
     assert ctx["medicines"]["from"] == "2026-09-21"
+    assert ctx["medicines"]["items"] == [{"name": "Telmisartan", "dosage": "1-0-0"}]
     assert ctx["medicines"]["patient_instructions"] == "Investigation --normal, BP --118/75"
     assert ctx["care"]["recent_complaints"][0]["date"] == "2026-09-21"
 
@@ -410,3 +490,162 @@ def test_visit_history_has_every_visit_and_costs_no_extra_call(monkeypatch):
     assert calls.count("/patients/p7/summary") == 1 and calls.count("/patients/p7/timeline") == 1
     assert clinic_api.visit_history("kid") is None and clinic_api.visit_history("nobody") is None
     clinic_api._cache.clear()
+
+
+# ── The colleague's flags reach the AI's concerns, not its evidence (2026-11-16) ──
+
+# bd8b445c's flags (2026-11-16), shortened.
+FLAGS = [
+    {"level": "high", "title": "Type 2 diabetes mellitus: HbA1c / glucose out of range", "evidence": "HbA1c 7.6 %",
+     "kind": "condition", "time": "current", "as_of": "", "undated": True},
+    {"level": "high", "title": "1 missed follow-up incl. the latest", "evidence": "due 2026-10-11",
+     "kind": "followup", "time": "current", "as_of": "2026-10-01"},
+    {"level": "high", "title": "Visual symptoms with diabetes", "evidence": "blurred vision (#1, #2)",
+     "kind": "risk", "time": "past", "as_of": "2026-05-29"},
+    {"level": "high", "title": "Repeated oral NSAIDs with Hypertension", "evidence": "Nucoxia",
+     "kind": "medication", "time": "past", "as_of": "2026-09-17"},
+    {"level": "medium", "title": "Pulse above 100", "evidence": "110 bpm (#3)",  # an old past flag (made up for the test)
+     "kind": "risk", "time": "past", "as_of": "2026-04-01"},
+]
+
+
+def test_clinic_flags_sent_to_the_ai():
+    from agent.assess import clinic_flags
+    lines = clinic_flags({"clinical_summary": {"flags": FLAGS}}, date(2026, 11, 16), 183)
+    assert lines == [
+        "high: Type 2 diabetes mellitus: HbA1c / glucose out of range (HbA1c 7.6 %) [undated]",
+        "high: 1 missed follow-up incl. the latest (due 2026-10-11) [current, last seen 2026-10-01]",
+        "high: Visual symptoms with diabetes (blurred vision (#1, #2)) [past, last seen 2026-05-29]",  # 171 days
+    ]  # left out: the medicine flag, and the past flag older than 183 days
+    assert clinic_flags({"clinical_summary": None}, TODAY, 183) == [] == clinic_flags({}, TODAY, 183)  # DB source
+
+
+def test_the_flag_window_comes_from_time_windows_csv(db):
+    assert load_reference(db).flag_days() == 183
+
+
+def test_a_quote_found_only_in_the_flags_is_not_evidence(db, ctx):
+    """The flags go to the AI apart from PATIENT_RECORD, so a condition the
+    AI 'finds' in a flag's wording is dropped like any other unfound quote."""
+    from agent.assess import AIAssessment, AIFinding, _check, _record
+    ctx = {**ctx, "clinical_summary": {"flags": [{"level": "high", "title": "Visual symptoms with diabetes",
+                                                  "evidence": "blurred vision (#1)"}]}}
+    ai = AIAssessment(conditions=[AIFinding(code="neurological", quote="Visual symptoms with diabetes",
+                                            where="clinic flags")],
+                      problem="", body_area="general", severity="moderate")
+    kept, dropped, _ = _check(ai, load_reference(db), _record(ctx), TODAY)
+    assert kept == [] and dropped[0]["why"] == "quote not found in the record"
+
+
+# ── Medicines the assessment AI sees: recent visits only (2026-11-16) ──────
+
+def test_the_ai_sees_medicines_only_from_recent_visits(db):
+    """MEDICINE_TIMELINE: visits on 2026-10-01, 2026-09-28 (two) and 2026-08-27.
+    On 2026-12-01 with a 90-day window, 2026-08-27 (96 days) loses its medicines."""
+    from agent.assess import _record
+    ref = load_reference(db)
+    assert ref.medicine_days() == 90  # data/time_windows.csv, row "medicine"
+    ctx = clinic_api.build_context({**SUMMARY, "visits": []}, MEDICINE_TIMELINE, {}, TODAY)
+    visits = _record(ctx, date(2026, 12, 1), ref.medicine_days())["visits"]
+    assert [(v["date"], len(v.get("medicines", []))) for v in visits] == [
+        ("2026-10-01", 2), ("2026-09-28", 2), ("2026-09-28", 0), ("2026-08-27", 0)]
+    assert visits[3]["date"] == "2026-08-27"  # the visit itself stays, only its medicines go
+    assert ctx["visits"][3]["medicines"]  # the doctor's screen still has them
+    assert len(_record(ctx)["visits"][3]["medicines"]) == 3  # no window given: unchanged
+
+
+def test_an_old_medicine_is_not_evidence(db):
+    """A medicine left out by the window can't be quoted for a condition."""
+    from agent.assess import AIAssessment, AIFinding, _check, _record
+    ref = load_reference(db)
+    ctx = clinic_api.build_context({**SUMMARY, "visits": []}, MEDICINE_TIMELINE, {}, TODAY)
+    ai = AIAssessment(conditions=[AIFinding(code="diabetes_any", quote="Metformin", where="visit 2026-08-27, medicines")],
+                      problem="", body_area="general", severity="moderate")
+    kept, dropped, _ = _check(ai, ref, _record(ctx, date(2026, 12, 1), 90), date(2026, 12, 1))
+    assert kept == [] and dropped[0]["why"] == "quote not found in the record"
+
+
+# ── Flag and medicine notes (2026-11-16) ───────────────────────────────────
+
+def test_medicine_notes_join_the_concerns_one_per_medicine():
+    """bd8b445c (2026-11-16): the AI put three medicines in one note."""
+    from agent.assess import AIAssessment, shown_text
+    ai = AIAssessment(conditions=[], problem="Diabetes with controlled BP", body_area="back", severity="moderate",
+                      concerns=["Back pain is long-standing"],
+                      medicine_notes=["Glimperide: risk of low sugar during or after exercise, carry something sweet; "
+                                      "Telmisartan: dizziness when standing up, rise slowly and drink water.",
+                                      "Medicine: Tab B-blocker 25 mg: the pulse rises less"])
+    assert shown_text(ai) == {"problem": "Diabetes with BP", "concerns": [
+        "Back pain is long-standing",
+        "Medicine: Glimperide: risk of low sugar during or after exercise, carry something sweet",
+        "Medicine: Telmisartan: dizziness when standing up, rise slowly and drink water",
+        "Medicine: Tab B-blocker 25 mg: the pulse rises less"]}  # not "Medicine: Medicine: ..."
+
+
+def test_clinic_flag_concerns_are_written_in_code_with_their_dates():
+    """The AI dropped "last seen" dates (2026-11-16): the lines come from the flags themselves."""
+    from agent.assess import flag_concerns
+    flags = [*FLAGS, {"level": "medium", "title": "BP at/above 130/80 target at latest visit", "kind": "risk",
+                      "time": "current", "as_of": "2026-10-01",
+                      "evidence": "Last 3 readings: 134/82, 135/76 · similar to the 9 earlier readings · on Telmisartan"}]
+    assert flag_concerns({"clinical_summary": {"flags": flags}}, date(2026, 11, 16), 183) == [
+        "Clinic flag: Type 2 diabetes mellitus: HbA1c / glucose out of range: HbA1c 7.6 % (undated)",
+        "Clinic flag: 1 missed follow-up incl. the latest: due 2026-10-11 (current, last seen 2026-10-01)",
+        "Clinic flag: Visual symptoms with diabetes: blurred vision (#1, #2) (past, last seen 2026-05-29)",
+        "Clinic flag: BP at/above 130/80 target at latest visit: Last 3 readings: 134/82, 135/76 "
+        "(current, last seen 2026-10-01)"]  # no medicine flag, no old past flag, no medicine in the evidence
+    assert flag_concerns({}, TODAY, 183) == []  # the DB source: none
+
+
+@pytest.mark.parametrize("where, quote, other_where, other_quote, same", [
+    ("BMI measured 2026-10-01", "BMI 30.8", "measured on 2026-10-01", "BMI 30.8", True),
+    ("visit 2026-09-28, complaint", "Follow up -k/C/o-HTN-DM, general weakness",
+     "visit 2026-09-28, complaint", "K/C/o-HTN-DM, general weakness", True),  # the AI quoted part of it
+    ("visit 2026-09-17, complaint", "Follow up -K/C/o-HTN,DM, report check",
+     "visit 2026-09-17, complaint", "Follow up -K/C/o-HTN-DM, report check", True),  # only punctuation differs
+    ("doctor recorded", "Hypertension", "doctor recorded", "Hypertension", True),
+    ("visit 2026-09-17, diagnosis", "Cervical pain", "visit 2026-07-10, diagnosis", "Cervical pain", False),  # other visit
+    ("doctor recorded", "Hypertension", "health history", "hypertension", False),  # other source
+    # bd8b445c (2026-11-16): a diagnosis inside the same day's complaint is not the same evidence
+    ("visit 2026-06-18, complaint", "Domestic fall yesterday,lt hand stuck and shoulder pain",
+     "visit 2026-06-18, diagnosis", "Shoulder pain", False),
+    ("visit 2026-07-10, complaint", "Follow up HTN, Dm, acidity", "visit 2026-07-10, diagnosis", "Htn", False)])
+def test_the_same_evidence_is_shown_once(where, quote, other_where, other_quote, same):
+    from agent.routing import _same_evidence
+    assert _same_evidence(where, quote, other_where, other_quote) is same
+
+
+def test_every_rules_evidence_line_is_kept_and_only_the_ais_repeat_goes(db):
+    """Through finalize: the rules' complaint and diagnosis lines of one day
+    both stay; the AI's partial copy of the complaint goes."""
+    from agent.conditions import Finding, RuleResult
+    from agent.routing import finalize
+    rules = RuleResult(findings=[
+        Finding("spondylosis", "rules", "visit 2026-07-10, diagnosis", "Cervical pain"),
+        Finding("spondylosis", "rules", "visit 2026-07-10, complaint", "Follow up, back pain, neck pain, cervical pain"),
+    ], unmapped=[], warnings=[])
+    ai = [Finding("spondylosis", "ai", "visit 2026-07-10, chief_complaint", "back pain, neck pain"),
+          Finding("spondylosis", "ai", "visit 2026-09-17, diagnosis_confirmed", "Cervical pain")]
+    ctx = {"visits": [], "vital_flags": [], "conditions": {"doctor_recorded": []}, "alerts": {"emergencies": []},
+           "patient": {"age": 50}, "body": {}}
+    result = finalize(ctx, load_reference(db), rules, None, ai)
+    [g] = [c for c in result["conditions"] if c["code"] == "spondylosis"]
+    assert g["evidence"] == ['visit 2026-07-10, diagnosis: "Cervical pain"',
+                             'visit 2026-07-10, complaint: "Follow up, back pain, neck pain, cervical pain"',
+                             'visit 2026-09-17, diagnosis: "Cervical pain"']  # another visit: kept
+
+
+def test_raw_field_names_in_the_ais_evidence_are_reworded():
+    from agent.routing import _tidy_where
+    assert _tidy_where("visit 2026-10-01, diagnosis_provisional") == "visit 2026-10-01, diagnosis"
+    assert _tidy_where("visit 2026-09-17, diagnosis_confirmed") == "visit 2026-09-17, diagnosis"
+    assert _tidy_where("recorded_conditions") == "doctor recorded"
+
+
+def test_the_ai_gets_the_latest_prescription_only_if_recent():
+    from agent.assess import _record
+    ctx = clinic_api.build_context({**SUMMARY, "visits": []}, MEDICINE_TIMELINE, {}, TODAY)
+    assert _record(ctx, date(2026, 11, 16), 90)["latest_prescription"] == {
+        "date": "2026-10-01", "medicines": ctx["medicines"]["items"]}
+    assert _record(ctx, date(2027, 1, 15), 90)["latest_prescription"] is None  # 106 days: ended
+    assert _record({**ctx, "medicines": {"from": None, "items": []}}, TODAY, 90)["latest_prescription"] is None

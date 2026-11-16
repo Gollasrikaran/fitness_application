@@ -55,7 +55,9 @@ def test_csv_values():
     w = {(r["what"], r["counts_from"]): r["days"] for r in time_windows(_from_csv()[0]) if r["counts_from"] != "reading"}
     assert w == {("acute_injury", "diagnosis"): 90, ("recent_surgery", "diagnosis"): 90,
                  ("pregnancy", "diagnosis"): 365, ("sprain_strain", "diagnosis"): 90,
-                 ("any", "complaint"): 183, ("warning", "complaint"): 183}
+                 ("any", "complaint"): 183, ("warning", "complaint"): 183,
+                 ("clinic_flag", "flag"): 183,  # the API's clinical flags sent to the AI (2026-11-16)
+                 ("medicine", "prescription"): 90}  # medicines the assessment AI sees (2026-11-16)
 
 
 # ── Diagnoses ───────────────────────────────────────────────────────────────

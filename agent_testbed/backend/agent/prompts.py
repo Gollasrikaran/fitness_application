@@ -67,8 +67,10 @@ Return:
    - "severe": the patient should not get an exercise plan without a doctor deciding it directly: new nerve signs (numbness, weakness, radiating pain), chest pain, breathlessness, fainting, a recent fracture, injury or surgery, uncontrolled BP or sugar, pregnancy, serious illness.
    - "moderate": exercise is fine with care.
    - "mild": no particular concern.
-5. concerns: what a doctor should know before exercise, one line each.
-6. missing: information that would change the plan and is not in PATIENT_RECORD.
+5. concerns: what a doctor should know before exercise from PATIENT_RECORD that the conditions don't already say, one line each (e.g. a symptom, a complaint pattern, something odd in the record). Don't restate the conditions or say they need monitoring: the doctor sees the conditions list. Clinic flags and medicines don't go here: the clinic flags are shown to the doctor as they are, and medicines go in 6. Empty if nothing is left to add.
+   CLINIC_FLAGS (after PATIENT_RECORD) are a clinical screening's flags on this record, for your understanding only. Never quote them for conditions, and don't base severity on them.
+6. medicine_notes: go through every medicine in latest_prescription (in PATIENT_RECORD; null means no recent prescription, then return none). For each one that changes how exercise should be done, give a separate item "<medicine>: <effect>", e.g. sugar-lowering tablets (glimepiride, gliclazide) or insulin: risk of low sugar during or after exercise, carry something sweet; beta-blockers: the pulse rises less, so judge effort by breathing; BP tablets or water tablets: dizziness when standing up, rise slowly and drink water. Skip medicines with no real effect on exercise (vitamins, calcium, acid tablets). Never suggest starting, stopping or changing a medicine, and don't comment on interactions or doses.
+7. missing: information that would change the plan and is not in PATIENT_RECORD.
    A reading from the last 90 days counts as recent. Don't list BP, sugar or
    asthma readings to judge control: the rules decide that.
 

@@ -125,6 +125,11 @@ function AssessmentView({ a }) {
         <strong className="small">Assessment</strong>
         <span className={`badge sev-${a.severity}`}>{a.severity}</span>
       </div>
+      {a.ai_status === "failed" && (
+        <div className="warning">
+          ⚠ The AI check didn't run for this assessment: the rules' result is shown on its own. Generate the plan again to retry.
+        </div>
+      )}
       {a.problem && <p className="small">{a.problem}{a.body_area && <span className="muted"> · {a.body_area}</span>}</p>}
       {a.readings && Object.keys(a.readings).length > 0 && (
         <p className="small muted">Readings used for the plan: {readingsText(a.readings)}</p>

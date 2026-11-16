@@ -32,6 +32,7 @@ from store.models import Condition, ConditionAlias, TimeWindow, WarningComplaint
 
 RECENT_DAYS = 183  # default: chief complaints older than about 6 months may have resolved (data/time_windows.csv)
 OBESE_BMI = 30
+MEDICINE_DAYS = 90  # default: medicines the assessment AI sees (data/time_windows.csv, row "medicine")
 
 
 @dataclass
@@ -54,6 +55,16 @@ class Reference:
     def diagnosis_days(self, code: str) -> int | None:
         """How long a diagnosis counts; None: however old."""
         return self.windows.get((code, "diagnosis"))
+
+    def flag_days(self) -> int:
+        """How long a past clinical flag (Patient Intelligence API) is sent to
+        the AI: the "clinic_flag" row, else the complaint window."""
+        return self.windows.get(("clinic_flag", "flag")) or self.complaint_days()
+
+    def medicine_days(self) -> int:
+        """How old a visit can be for the assessment AI to see its medicines:
+        the "medicine" row, else 90 days."""
+        return self.windows.get(("medicine", "prescription")) or MEDICINE_DAYS
 
 
 @dataclass

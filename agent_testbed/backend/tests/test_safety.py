@@ -289,3 +289,19 @@ def test_kidney_stone_is_not_kidney_disease(db):
     real.warnings = []
     out = rule_findings(context(visits=[visit("2026-10-08", diagnosis="Renal calculi, kidney stone")]), real, TODAY)
     assert "other_unlisted" not in {f.code for f in out.findings}
+
+
+# ── The AI's free text doesn't claim control (fix 2026-11-16) ──────────────
+
+@pytest.mark.parametrize("text, out", [
+    # bd8b445c: the rules could not know the sugar control, the AI still said "controlled"
+    ("The patient has chronic back pain and spondylosis, along with obesity and controlled diabetes and hypertension.",
+     "The patient has chronic back pain and spondylosis, along with obesity and diabetes and hypertension."),
+    ("Knee pain with well-controlled hypertension", "Knee pain with hypertension"),
+    ("Uncontrolled DM and knee OA", "DM and knee OA"),
+    ("Back pain; BP is under control.", "Back pain; BP."),
+    ("Diabetes not under control, knee pain", "Diabetes, knee pain"),
+    ("Knee osteoarthritis, obesity", "Knee osteoarthritis, obesity")])
+def test_ai_text_never_claims_control(text, out):
+    from agent.assess import no_control_claims
+    assert no_control_claims(text) == out

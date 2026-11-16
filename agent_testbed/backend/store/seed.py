@@ -138,7 +138,9 @@ def time_windows(conditions: dict) -> list[dict]:
     for r in _rows("time_windows.csv"):
         what, counts_from, days = r["what"].strip(), r["counts_from"].strip(), (r["days"] or "").strip()
         known = what in READING_FIELDS if counts_from == "reading" else (
-            counts_from in ("diagnosis", "complaint") and (what in conditions or what in ("any", "warning")))
+            (counts_from, what) == ("flag", "clinic_flag")  # the API's clinical flags (agent.assess.clinic_flags)
+            or (counts_from, what) == ("prescription", "medicine")  # medicines the assessment AI sees (agent.assess._record)
+            or counts_from in ("diagnosis", "complaint") and (what in conditions or what in ("any", "warning")))
         if not known or (days and not days.isdigit()):
             log.warning("Time window %r dropped: unknown condition, source or days", r)
             continue
