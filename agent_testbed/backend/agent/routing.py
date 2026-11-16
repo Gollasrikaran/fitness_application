@@ -11,7 +11,10 @@ from __future__ import annotations
 import re
 
 from agent.conditions import Finding, Reference, RuleResult, has_phrase, words
-from store.plans import SEVERE_THIN_BMI, UNDERWEIGHT_BMI
+from datetime import date
+
+from agent.conditions import is_recent
+from store.plans import READING_WINDOWS, SEVERE_THIN_BMI, UNDERWEIGHT_BMI
 
 # The clinic's own vital flags (ELEVATED and LOW don't count as "not under control").
 _BP_FLAG = re.compile(r"^BP_(SYS|DIA)_(HIGH|CRITICAL)$")
@@ -63,14 +66,18 @@ def _underweight(context: dict) -> tuple[list[str], list[str]]:
 
 # With no reading, the safety decision stays "controlled" (BP's cautious
 # default is in the reading rules), but the name says control isn't known.
-_UNKNOWN_NAME = {"bp_controlled": "BP, control not known (no BP reading)",
-                 "diabetes_controlled": "Diabetes, control not known (no sugar reading)"}
+_UNKNOWN_NAME = {"bp_controlled": "BP, control not known (no recent BP reading)",
+                 "diabetes_controlled": "Diabetes, control not known (no recent sugar reading)"}
 
 
-def _uncontrolled(visits: list[dict], flags: list[dict], flag: re.Pattern, keys: tuple, what: str) -> tuple[bool | None, str]:
+def _uncontrolled(visits: list[dict], flags: list[dict], flag: re.Pattern, keys: tuple, what: str,
+                  today: date | None = None, days: int | None = None) -> tuple[bool | None, str]:
     """Not under control when the latest reading is flagged high, or any
     reading in the last 5 visits is critical. Returns (uncontrolled, why);
-    uncontrolled is None when there is no reading at all."""
+    uncontrolled is None when control is not known.
+    A latest reading older than `days` (its window in data/time_windows.csv)
+    counts only when high (decided 2026-11-16): old good news is not "under
+    control", old bad news still is "not under control"."""
     critical = sorted({f"{f['code']} on {f['date']}" for f in flags
                        if flag.search(f["code"]) and f["severity"] == "CRITICAL"})
     if critical:
@@ -78,24 +85,30 @@ def _uncontrolled(visits: list[dict], flags: list[dict], flag: re.Pattern, keys:
     latest = next((str(v["date"]) for v in visits if any(k in v.get("vitals", {}) for k in keys)), None)
     if latest is None:
         return None, f"no {what} reading in the recent visits, so whether it is under control is not known"
+    old = today is not None and days is not None and not is_recent(latest, today, days)
+    age = f", {(today - date.fromisoformat(latest[:10])).days} days ago: older than its {days}-day window" if old else ""
     high = sorted({f["code"] for f in flags if flag.search(f["code"]) and str(f["date"]) == latest})
     if high:
-        return True, f"latest {what} reading ({latest}) flagged {', '.join(high)}"
+        return True, f"latest {what} reading ({latest}{age}) flagged {', '.join(high)}"
+    if old:
+        return None, f"latest {what} reading ({latest}{age}) not flagged high, so whether it is under control is not known"
     return False, f"latest {what} reading ({latest}) not flagged high; nothing critical in the last 5 visits"
 
 
-def _resolve_markers(findings: list[Finding], context: dict) -> tuple[list[tuple[str, str]], set[str]]:
+def _resolve_markers(findings: list[Finding], context: dict, ref: Reference | None = None,
+                     today: date | None = None) -> tuple[list[tuple[str, str]], set[str]]:
     """bp_any / diabetes_any -> controlled or not, from the clinic's vital
     flags. Returns (code, evidence line) per decision, and the "controlled"
-    codes decided with no reading at all."""
+    codes decided with no recent reading (shown as "control not known")."""
     visits, flags = context["visits"], context["vital_flags"]
     notes, unknown = [], set()
-    for marker, strict, mild, flag, keys, what in (("bp_any", "high_bp", "bp_controlled", _BP_FLAG, _BP_KEYS, "BP"),
-                                                   ("diabetes_any", "diabetes", "diabetes_controlled", _SUGAR_FLAG,
-                                                    _SUGAR_KEYS, "sugar")):
+    for marker, strict, mild, flag, keys, what, metric in (
+            ("bp_any", "high_bp", "bp_controlled", _BP_FLAG, _BP_KEYS, "BP", "bp"),
+            ("diabetes_any", "diabetes", "diabetes_controlled", _SUGAR_FLAG, _SUGAR_KEYS, "sugar", "sugar")):
         if not any(f.code in (marker, strict, mild) for f in findings):
             continue
-        bad, why = _uncontrolled(visits, flags, flag, keys, what)
+        days = ((ref.windows.get((metric, "reading")) if ref else None) or READING_WINDOWS[metric]) if today else None
+        bad, why = _uncontrolled(visits, flags, flag, keys, what, today, days)
         for f in findings:
             if f.code == marker:
                 f.code = strict if bad else mild
@@ -174,13 +187,15 @@ def _same_evidence(where: str, quote: str, other_where: str, other_quote: str) -
 
 
 def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
-             ai_findings: list[Finding]) -> dict:
+             ai_findings: list[Finding], today: date | None = None) -> dict:
+    """`today`: for the readings' windows in "under control" (default: the
+    record's as_of; with neither, the latest reading counts however old)."""
     findings = [*rules.findings, *ai_findings]
     for f in findings:
         f.code = _TO_MARKER.get(f.code, f.code)
     # A clinic condition we can't map: a doctor decides.
     findings += [Finding("other_unlisted", "rules", u, u) for u in rules.unmapped]
-    flag_notes, unknown = _resolve_markers(findings, context)
+    flag_notes, unknown = _resolve_markers(findings, context, ref, today or context.get("as_of"))
     flag_notes += _resolve_asthma(findings, context, rules)
 
     # The stricter reading wins: "controlled" evidence joins the uncontrolled

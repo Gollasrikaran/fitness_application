@@ -262,7 +262,7 @@ def run_assessment(patient_id: str, doctor_id: str, today: date | None = None,
     except Exception as exc:  # the rules' result stands on its own
         log.error("Assessment AI call failed for patient %s: %s", patient_id, exc)
 
-    result = finalize(context, ref, rules, ai, ai_findings)
+    result = finalize(context, ref, rules, ai, ai_findings, today)
     with session() as db:
         saved = Assessment(
             patient_id=patient_id, doctor_id=doctor_id, codes=result["codes"], conditions=result["conditions"],

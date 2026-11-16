@@ -214,7 +214,7 @@ def test_diabetes_with_no_sugar_reading_says_control_not_known(ref):
     ctx = context(visits=[visit("2026-10-20", diagnosis="T2DM", bp="113/76")])
     out = assess(ctx, ref)
     dm = next(c for c in out["conditions"] if c["code"] == "diabetes_controlled")
-    assert dm["name"] == "Diabetes, control not known (no sugar reading)"
+    assert dm["name"] == "Diabetes, control not known (no recent sugar reading)"
     assert any("not known" in e for e in dm["evidence"])
     assert out["severity"] != "severe"  # the safety decision is unchanged
 
@@ -228,7 +228,7 @@ def test_diabetes_with_an_unflagged_reading_is_still_under_control(ref):
 def test_bp_with_no_reading_says_control_not_known(ref):
     bp = next(c for c in assess(context(visits=[visit("2026-10-20", diagnosis="HTN")]), ref)["conditions"]
               if c["code"] == "bp_controlled")
-    assert bp["name"] == "BP, control not known (no BP reading)"
+    assert bp["name"] == "BP, control not known (no recent BP reading)"
 
 
 # ── Dizziness stops a draft only for higher-risk patients (option 2, 2026-11-05) ──
@@ -305,3 +305,47 @@ def test_kidney_stone_is_not_kidney_disease(db):
 def test_ai_text_never_claims_control(text, out):
     from agent.assess import no_control_claims
     assert no_control_claims(text) == out
+
+
+# ── "Under control" uses the reading's window (decided 2026-11-16) ─────────
+# Old good news doesn't count; old bad news still does.
+
+from datetime import date as _date
+
+from agent.routing import _BP_FLAG, _BP_KEYS, _SUGAR_FLAG, _SUGAR_KEYS, _uncontrolled
+
+_TODAY = _date(2026, 11, 16)
+
+
+def test_an_old_normal_sugar_is_control_not_known():
+    """016e4c77: sugar 128.4 on 2026-08-06 (102 days), no flag."""
+    visits = [{"date": "2026-08-06", "vitals": {"nonfasting_sugar_mg_dl": 128.4}}]
+    bad, why = _uncontrolled(visits, [], _SUGAR_FLAG, _SUGAR_KEYS, "sugar", _TODAY, 90)
+    assert bad is None
+    assert why == ("latest sugar reading (2026-08-06, 102 days ago: older than its 90-day window) "
+                   "not flagged high, so whether it is under control is not known")
+
+
+def test_an_old_high_bp_still_means_not_under_control():
+    visits = [{"date": "2026-07-10", "vitals": {"bp": "172/98"}}]
+    flags = [{"date": "2026-07-10", "code": "BP_SYS_HIGH", "severity": "ABNORMAL"}]
+    bad, why = _uncontrolled(visits, flags, _BP_FLAG, _BP_KEYS, "BP", _TODAY, 90)
+    assert bad is True and "129 days ago: older than its 90-day window) flagged BP_SYS_HIGH" in why
+
+
+def test_a_recent_normal_reading_is_still_under_control():
+    visits = [{"date": "2026-10-01", "vitals": {"bp": "135/76"}}]
+    bad, _ = _uncontrolled(visits, [], _BP_FLAG, _BP_KEYS, "BP", _TODAY, 90)
+    assert bad is False
+
+
+def test_finalize_shows_an_old_normal_reading_as_control_not_known(db):
+    from agent.conditions import Finding, RuleResult, load_reference
+    from agent.routing import finalize
+    rules = RuleResult(findings=[Finding("diabetes_any", "rules", "visit 2026-08-06, diagnosis", "T2dm")],
+                       unmapped=[], warnings=[])
+    ctx = {"visits": [{"date": "2026-08-06", "vitals": {"nonfasting_sugar_mg_dl": 128.4}}], "vital_flags": [],
+           "conditions": {"doctor_recorded": []}, "alerts": {"emergencies": []}, "patient": {"age": 40}, "body": {}}
+    [dm] = finalize(ctx, load_reference(db), rules, None, [], _TODAY)["conditions"]
+    assert dm["code"] == "diabetes_controlled"  # the same exercise rules as before
+    assert dm["name"] == "Diabetes, control not known (no recent sugar reading)"

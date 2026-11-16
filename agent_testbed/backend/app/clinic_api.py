@@ -139,7 +139,14 @@ _LAB_KEYS = {"haemoglobin": ("hb", "g/dl"), "hemoglobin": ("hb", "g/dl"), "hb": 
              "fasting glucose": ("fasting_sugar_mg_dl", "mg/dl"), "fasting plasma glucose": ("fasting_sugar_mg_dl", "mg/dl"),
              "random blood sugar": ("nonfasting_sugar_mg_dl", "mg/dl"), "rbs": ("nonfasting_sugar_mg_dl", "mg/dl"),
              "post prandial blood sugar": ("nonfasting_sugar_mg_dl", "mg/dl"), "ppbs": ("nonfasting_sugar_mg_dl", "mg/dl"),
-             "random glucose": ("nonfasting_sugar_mg_dl", "mg/dl")}
+             "random glucose": ("nonfasting_sugar_mg_dl", "mg/dl"),
+             # 016e4c77's reports (2026-11-16): "Glucose" and "BLOOD SUGAR RANDOM" weren't read.
+             # A plain "glucose" counts as random: fasting and random use the same bands.
+             "glucose": ("nonfasting_sugar_mg_dl", "mg/dl"), "blood glucose": ("nonfasting_sugar_mg_dl", "mg/dl"),
+             "blood sugar random": ("nonfasting_sugar_mg_dl", "mg/dl"),
+             "random blood glucose": ("nonfasting_sugar_mg_dl", "mg/dl"),
+             "blood sugar fasting": ("fasting_sugar_mg_dl", "mg/dl"),
+             "fasting blood glucose": ("fasting_sugar_mg_dl", "mg/dl")}
 
 
 def lab_readings(labs: list[dict]) -> dict:

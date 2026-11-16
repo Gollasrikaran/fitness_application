@@ -649,3 +649,11 @@ def test_the_ai_gets_the_latest_prescription_only_if_recent():
         "date": "2026-10-01", "medicines": ctx["medicines"]["items"]}
     assert _record(ctx, date(2027, 1, 15), 90)["latest_prescription"] is None  # 106 days: ended
     assert _record({**ctx, "medicines": {"from": None, "items": []}}, TODAY, 90)["latest_prescription"] is None
+
+
+@pytest.mark.parametrize("name, key", [
+    ("Glucose", "nonfasting_sugar_mg_dl"), ("BLOOD SUGAR RANDOM", "nonfasting_sugar_mg_dl"),  # 016e4c77
+    ("Blood Sugar Fasting", "fasting_sugar_mg_dl"), ("Fasting Blood Glucose", "fasting_sugar_mg_dl")])
+def test_sugar_lab_names_reach_the_reading_rules(name, key):
+    assert clinic_api.lab_readings([{"name": name, "value": "312 mg/dL", "status": "High"}]) == {key: 312.0}
+    assert clinic_api.lab_readings([{"name": name, "value": "17.3 mmol/L", "status": "High"}]) == {}  # other unit
