@@ -111,7 +111,12 @@ def vitals_by_visit(summary: dict) -> dict[str, dict]:
 
 _FIELDS = {"chief complaint": "complaint", "provisional diagnosis": "provisional",
            "confirmed diagnosis": "confirmed", "prescription instructions": "instructions"}
-_LINE = re.compile(r"^\s*([A-Za-z][A-Za-z \-]*?)\s*(?:\([^)]*\))?\s*:\s*(.*)$")
+_LINE = re.compile(r"^\s*([A-Za-z][A-Za-z \-]*?)\s*(?:\(([^)]*)\))?\s*:\s*(.*)$")
+# "Provisional Diagnosis (Document 2): ..." is the colleague's OCR of a scanned
+# paper. It is often the previous visit's prescription, or a misread form
+# heading (0017c9d8, 2026-11-17), so it never overrides the doctor's typed
+# "(database)" value; it is used only when that value is empty.
+_FROM_DOCUMENT = re.compile(r"^document\b", re.I)
 _EMPTY = {"", "not documented", "none", "-", "—"}
 _LAB = re.compile(r"^\s*•\s*([^:]+):\s*(.*?)\s*(?:\(Ref:.*?)?(?:\[([^\[\]]*(?:\([^)]*\))?)\])?\s*$")
 # "• 2026-10-01 | MISSED", "• 2026-09-16 | COMPLETED → VISIT_COMPLETED"
@@ -252,8 +257,14 @@ def parse_timeline(text: str) -> list[dict]:
             if current is None:  # a timeline without VISIT ID lines
                 current = {"date": day, "visit_id": None}
                 visits.append(current)
-            value = m[2].strip().strip(",").strip()
-            current[field] = None if value.lower() in _EMPTY else value
+            value = m[3].strip().strip(",").strip()
+            value = None if value.lower() in _EMPTY else value
+            if _FROM_DOCUMENT.match(m[2] or ""):
+                if current.get(field) or not value:  # the doctor's typed value wins
+                    field = None  # and the scan's lines don't continue it
+                    continue
+                current.setdefault("from_document", []).append(field)
+            current[field] = value
     return visits
 
 

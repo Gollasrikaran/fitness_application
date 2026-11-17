@@ -12,3 +12,5 @@ spo2,reading,30,"POC value (2026-11-13). SpO2 changes within days (a fever or co
 pulse,reading,30,"POC value (2026-11-13). Resting pulse changes within days (fever, pain). To confirm with the doctor."
 clinic_flag,flag,183,"POC value (2026-11-16). The clinical flags from the Patient Intelligence API (about 6 months, like complaints): a flag marked past whose latest evidence is older is not sent to the AI. Current and undated flags are always sent."
 medicine,prescription,90,"POC value (2026-11-16). The assessment AI sees a visit's medicines only when the visit is this recent (like BP and sugar), so it can note how current medicines affect exercise. No rules use medicines. To confirm with the doctor."
+skin_infection,diagnosis,30,POC value (2026-11-17). Shingles and skin infections usually settle in 2-4 weeks. To confirm with the doctor.
+skin_infection,complaint,30,POC value (2026-11-17). Shingles and skin infections usually settle in 2-4 weeks. To confirm with the doctor.

@@ -38,8 +38,9 @@ def test_knee_pain_keeps_the_wall_sit_shallow(db):
 
 
 RERANKED = {"bp_controlled", "diabetes_controlled", "prediabetes", "obesity", "arthritis_knee", "arthritis_hip",
-            "spondylosis", "asthma_controlled"}  # on purpose: BP 2026-10-28, the rest 2026-10-29
-# (test_exercises_2026_10_29.py); asthma ranked from scratch 2026-10-30 (test_asthma.py)
+            "spondylosis", "asthma_controlled", "chronic_back_pain"}  # on purpose: BP 2026-10-28, the rest
+# 2026-10-29 (test_exercises_2026_10_29.py); asthma ranked from scratch 2026-10-30 (test_asthma.py); back pain
+# 2026-11-17 (test_joint_hand_skin.py)
 
 
 def test_new_exercises_rank_after_the_original_twelve(db):

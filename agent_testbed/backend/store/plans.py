@@ -40,6 +40,9 @@ HIGH_BMI = 30.0        # at or above: high-impact and floor exercises left out (
 UNDERWEIGHT_BMI = 18.5  # below: vigorous left out, strength and balance first, a concern for the doctor
 SEVERE_THIN_BMI = 16.0  # below: a doctor writes the plan (agent/routing.py)
 MAX_EXERCISES = 5      # in any draft the agent makes
+# Hand or wrist pain (2026-11-17, research/JOINT_AND_BACK_PAIN.md): only these
+# patients are offered hand exercises (Exercise.body_part "hand").
+HAND_CODES = {"hand_pain", "carpal_tunnel"}
 # Walking is the core of the plan for BP, diabetes and asthma (research/*.md):
 # the first of these the patient is allowed always leads a draft, and the
 # others are left out (they repeat it). Marching is walking indoors.
@@ -153,10 +156,13 @@ def approved_exercises(db: Session, codes: list[str]) -> list[dict]:
         if set(by_condition) != set(codes) or any(r.verdict == "avoid" for r in by_condition.values()):
             continue
         notes = [r.note for r in by_condition.values() if r.verdict == "modify" and r.note]
+        names = {c.code: re.sub(r"\s*\(.*?\)", "", c.display_name) for c in conditions}  # "Skin problem (...)" -> "Skin problem"
+        benefits = [f"{names[code]}: {by_condition[code].benefit}" for code in codes
+                    if code in by_condition and by_condition[code].benefit]
         approved.append({"activity_type": ex.activity_type, "display_name": ex.display_name,
                          "unit": ex.amount_unit, "default_sets": ex.default_sets,
                          "default_amount": ex.default_amount, "verdict": "modify" if notes else "safe",
-                         "notes": notes})
+                         "notes": notes, "benefits": benefits})
     return approved
 
 
@@ -185,6 +191,8 @@ def candidates(db: Session, codes: list[str], age: int | None,
     approved = [e for e in approved if e["activity_type"] not in blocked]
     ranks = _usefulness(db, codes)
     by_type = {e.activity_type: e for e in db.scalars(select(Exercise))}
+    if not HAND_CODES & set(codes):  # hand exercises only for hand or wrist pain (the doctor can still add them)
+        approved = [e for e in approved if by_type[e["activity_type"]].body_part != "hand"]
     older = age is not None and age >= OLDER_AGE
     if older or (bmi is not None and bmi >= HIGH_BMI):
         why = f"age {age} >= {OLDER_AGE}" if older else f"BMI {bmi} >= {HIGH_BMI:g}"
@@ -218,7 +226,7 @@ def candidates(db: Session, codes: list[str], age: int | None,
         ex = by_type[e["activity_type"]]
         out.append({"activity_type": e["activity_type"], "name": e["display_name"], "unit": e["unit"],
                     "sets": e["default_sets"], "amount": amount, "notes": " ".join(e["notes"]),
-                    "verdict": e["verdict"],
+                    "verdict": e["verdict"], "benefits": e["benefits"],  # research lines, per condition
                     # for plan_slots(): the exercise's type, body part and usefulness for these conditions
                     "exercise_type": ex.exercise_type, "body_part": ex.body_part or "",
                     "rank": (ranks.get(e["activity_type"]) or 99, ex.priority_order)})
@@ -251,8 +259,11 @@ SLOTS = (
     ("breathing", lambda e: e["exercise_type"] == "breathing"),
 )
 # When the balance slot has nothing allowed, a gentle movement takes its place.
-SLOT_STANDINS = {"balance": lambda e: e["exercise_type"] in ("mobility", "stretch")}
+SLOT_STANDINS = {"balance": lambda e: e["exercise_type"] in ("mobility", "stretch") and e["body_part"] != "hand"}
 OPTIONS_PER_SLOT = 3  # the AI may choose among the best few of a slot
+# A hand patient's plan (HAND_CODES): the hand slot takes the upper-body
+# slot's place (Wall Push-up puts weight on the hands).
+HAND_SLOT = ("hand", lambda e: e["body_part"] == "hand")
 
 
 def plan_slots(allowed: list[dict]) -> list[tuple[str, list[dict]]]:
@@ -260,11 +271,14 @@ def plan_slots(allowed: list[dict]) -> list[tuple[str, list[dict]]]:
     fit first. Within a slot the usefulness rank decides, "safe" or "modify"
     alike (a "modify" keeps its caution note). An empty slot is left out;
     the plan is then filled up to MAX_EXERCISES with the best-ranked other
-    allowed exercises ("other"), never a holding one or another walking one."""
+    allowed exercises ("other"), never a holding one, another walking one or
+    a hand one. When hand exercises are allowed (a hand patient, see
+    candidates()), the hand slot replaces the upper-body strength slot."""
     pool = [e for e in allowed if e["activity_type"] not in CORE_AEROBIC and e["exercise_type"] != "isometric"]
     by_rank = lambda options: sorted(options, key=lambda e: e["rank"])
+    hand = any(HAND_SLOT[1](e) for e in pool)
     slots, used = [], set()
-    for name, fits in SLOTS:
+    for name, fits in (HAND_SLOT if hand and n == "upper-body strength" else (n, f) for n, f in SLOTS):
         options = by_rank(e for e in pool if fits(e))
         if not options and name in SLOT_STANDINS:
             options = by_rank(e for e in pool if SLOT_STANDINS[name](e))
@@ -273,7 +287,7 @@ def plan_slots(allowed: list[dict]) -> list[tuple[str, list[dict]]]:
             slots.append((name, options))
             used.update(e["activity_type"] for e in options)  # offered once only: no repeats across slots
     room = MAX_EXERCISES - bool(core_exercise(allowed)) - len(slots)
-    for e in by_rank(e for e in pool if e["activity_type"] not in used)[:max(room, 0)]:
+    for e in by_rank(e for e in pool if e["activity_type"] not in used and e["body_part"] != "hand")[:max(room, 0)]:
         slots.insert(len(slots) - (slots[-1][0] == "breathing" if slots else 0), ("other", [e]))  # breathing stays last
         used.add(e["activity_type"])
     return slots

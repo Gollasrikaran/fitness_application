@@ -103,6 +103,27 @@ def has_phrase(text_words: list[str], phrase_words: list[str]) -> bool:
     return n > 0 and any(text_words[i:i + n] == phrase_words for i in range(len(text_words) - n + 1))
 
 
+def _starts(text_words: list[str], phrase_words: list[str]) -> list[int]:
+    n = len(phrase_words)
+    return [i for i in range(len(text_words) - n + 1) if n and text_words[i:i + n] == phrase_words]
+
+
+def longest_matches(text_words: list[str], phrases: list[tuple[list[str], str]]) -> list[tuple[list[str], str]]:
+    """The alias phrases found in the text, each kept only where it isn't
+    part of a longer alias phrase found at the same place (2026-11-17):
+    "knee joint pain" is knee pain, not also "joint pain" (doctor decides);
+    "pre diabetes" is prediabetes, not also "diabetes". One phrase can carry
+    several codes (one row per code), and all of them are kept."""
+    found = [(p, code, _starts(text_words, p)) for p, code in phrases]
+    found = [f for f in found if f[2]]
+    spans = [(s, s + len(p)) for p, _, starts in found for s in starts]
+
+    def inside_longer(start: int, n: int) -> bool:
+        return any(e - s > n and s <= start and start + n <= e for s, e in spans)
+
+    return [(p, code) for p, code, starts in found if any(not inside_longer(s, len(p)) for s in starts)]
+
+
 def is_recent(day, today: date, days: int = RECENT_DAYS) -> bool:
     day = date.fromisoformat(str(day)[:10]) if day else None
     return day is not None and day >= today - timedelta(days=days)
@@ -118,16 +139,15 @@ def rule_findings(context: dict, ref: Reference, today: date | None = None) -> R
 
     def match_text(text: str, day, where: str, complaint: bool) -> None:
         text_words = words(text)
-        for phrase_words, code in phrases:
-            if has_phrase(text_words, phrase_words):
-                days = ref.complaint_days(code) if complaint else ref.diagnosis_days(code)
-                if days is not None and day and not is_recent(day, today, days):  # no date: it counts
-                    line = f"{ref.conditions.get(code, {}).get('name', code)}: {where} (\"{text.strip()}\"), " \
-                           f"older than {days} days"
-                    if line not in out.expired:
-                        out.expired.append(line)
-                    continue
-                out.findings.append(Finding(code, "rules", where, text.strip(), complaint))
+        for _, code in longest_matches(text_words, phrases):
+            days = ref.complaint_days(code) if complaint else ref.diagnosis_days(code)
+            if days is not None and day and not is_recent(day, today, days):  # no date: it counts
+                line = f"{ref.conditions.get(code, {}).get('name', code)}: {where} (\"{text.strip()}\"), " \
+                       f"older than {days} days"
+                if line not in out.expired:
+                    out.expired.append(line)
+                continue
+            out.findings.append(Finding(code, "rules", where, text.strip(), complaint))
 
     conds = context["conditions"]
     listed = ([(c["name"], "doctor recorded") for c in conds["doctor_recorded"]]

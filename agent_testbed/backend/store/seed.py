@@ -151,13 +151,16 @@ def time_windows(conditions: dict) -> list[dict]:
 
 
 def _aliases(conditions: dict) -> list[dict]:
-    """data/condition_aliases.csv, minus rows pointing at an unknown code."""
+    """data/condition_aliases.csv, minus rows pointing at an unknown code. A
+    row may name several codes separated by "|" ("djd knee spine": knee and
+    spine); it becomes one alias per code."""
     out = []
     for r in _rows("condition_aliases.csv"):
-        if r["code"] not in conditions and r["code"] not in ALIAS_MARKERS:
-            log.warning("Alias %r -> %r dropped: unknown condition code", r["phrase"], r["code"])
-            continue
-        out.append({"source": r["source"], "phrase": r["phrase"].strip(), "code": r["code"], "note": r["note"] or ""})
+        for code in (c.strip() for c in r["code"].split("|") if c.strip()):
+            if code not in conditions and code not in ALIAS_MARKERS:
+                log.warning("Alias %r -> %r dropped: unknown condition code", r["phrase"], code)
+                continue
+            out.append({"source": r["source"], "phrase": r["phrase"].strip(), "code": code, "note": r["note"] or ""})
     log.info("Condition aliases loaded: %d", len(out))
     return out
 
@@ -188,8 +191,16 @@ def _from_csv() -> tuple[dict, dict, dict]:
                 log.warning("Exercise %s: %s %r is not one of %s", e["activity_type"], k, e[k], sorted(allowed))
     rules = {(r["condition_code"], r["activity_type"]): {
         "condition_code": r["condition_code"], "activity_type": r["activity_type"], "verdict": r["verdict"],
-        "note": r["note"], "usefulness_rank": _int(r["usefulness_rank"])}
+        "note": r["note"], "usefulness_rank": _int(r["usefulness_rank"]), "benefit": ""}
         for r in _rows("safety_grid.csv")}
+    # Why an exercise helps a condition, from our research (2026-11-17). A line
+    # for a pair the grid doesn't rule on is dropped: it would never be used.
+    for r in _rows("exercise_benefits.csv"):
+        rule = rules.get((r["condition_code"], r["activity_type"]))
+        if rule is None:
+            log.warning("Benefit %s x %s dropped: no safety rule", r["condition_code"], r["activity_type"])
+            continue
+        rule["benefit"] = r["benefit"].strip()
     return conditions, exercises, rules
 
 

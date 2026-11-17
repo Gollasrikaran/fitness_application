@@ -54,7 +54,7 @@ class Exercise(Base):
     breath_hold: Mapped[bool] = mapped_column(Boolean, default=False)  # people tend to hold their breath (straining or holding)
     position: Mapped[str] = mapped_column(String(16), default="")  # standing | chair | floor
     impact: Mapped[str] = mapped_column(String(8), default="")  # low | high
-    body_part: Mapped[str] = mapped_column(String(8), default="")  # strength only: upper | lower | core (the plan's slots)
+    body_part: Mapped[str] = mapped_column(String(8), default="")  # upper | lower | core (strength slots) | hand (hand patients only)
     # For the patient's plan page, from the reference DB
     instructions: Mapped[list] = mapped_column(JSON, default=list)  # steps, in order (reference DB, else our CSV)
     images: Mapped[list] = mapped_column(JSON, default=list)  # demo image URLs
@@ -69,6 +69,9 @@ class SafetyRule(Base):
     verdict: Mapped[str] = mapped_column(String(8))  # safe | modify | avoid
     note: Mapped[str] = mapped_column(Text, default="")
     usefulness_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Why the exercise helps this condition, from our research (data/exercise_benefits.csv,
+    # 2026-11-17); shown to the doctor as the exercise's "why". Empty: no evidence line.
+    benefit: Mapped[str] = mapped_column(Text, default="")
 
 
 class ReadingRule(Base):

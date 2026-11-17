@@ -11,7 +11,8 @@ NEW = ["calf_raise", "seated_knee_extension", "single_leg_stand", "heel_toe_walk
        "seated_march", "chair_hamstring_stretch", "chin_tuck"]
 DISC = ["herniated_disk", "degenerative_disc", "spinal_stenosis"]
 RERANKED = {"bp_controlled", "diabetes_controlled", "prediabetes", "obesity", "arthritis_knee", "arthritis_hip",
-            "spondylosis", "asthma_controlled"}  # asthma ranked from scratch 2026-10-30 (test_asthma.py)
+            "spondylosis", "asthma_controlled",  # asthma ranked from scratch 2026-10-30 (test_asthma.py)
+            "chronic_back_pain"}  # back pain ranked from the research 2026-11-17 (test_joint_hand_skin.py)
 NORMAL = {"bp": {"sys": 125.0, "dia": 80.0, "date": "2026-10-20"}}
 
 
@@ -44,7 +45,7 @@ def test_every_condition_ranks_each_exercise_once(db):
     for r in db.scalars(select(SafetyRule)):
         ranks.setdefault(r.condition_code, []).append(r.usefulness_rank)
     for code in RERANKED - {"bp_controlled"}:
-        assert sorted(ranks[code]) == list(range(1, 28)), code  # 27 exercises since 2026-10-30
+        assert sorted(ranks[code]) == list(range(1, 34)), code  # 33 exercises since 2026-11-17
 
 
 def test_reranked_conditions_put_the_research_backed_exercises_first(db):
@@ -53,9 +54,10 @@ def test_reranked_conditions_put_the_research_backed_exercises_first(db):
     assert first(db, "obesity", 3) == ["walk", "march_in_place", "seated_march"]
     # "safe" comes before "modify" whatever the rank: the knee straightening (knee), side leg raise (hip) and
     # chin tuck (neck) are "modify" there, so they follow the safe exercises.
-    assert first(db, "arthritis_knee", 3) == ["walk", "standing_hip_abduction", "glute_bridge"]
+    # Glute Bridge is "modify" for knee pain since 2026-11-17 (getting down to the floor), so it follows too.
+    assert first(db, "arthritis_knee", 3) == ["walk", "standing_hip_abduction", "calf_raise"]
     assert first(db, "arthritis_hip", 2) == ["walk", "seated_knee_extension"]
-    assert first(db, "spondylosis", 2) == ["neck_isometric", "shoulder_circles"]
+    assert first(db, "spondylosis", 2) == ["neck_isometric", "wall_pelvic_tilt"]  # pelvic tilt 3rd since 2026-11-17
 
 
 def test_diabetes_breath_holding_exercises_carry_the_breathing_note(db):

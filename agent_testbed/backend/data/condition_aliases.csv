@@ -83,10 +83,10 @@ text,spondylosis,spondylosis,
 text,cervical pain,spondylosis,
 text,neck pain,spondylosis,
 text,djd spine,spondylosis,
-text,djd knee spine,spondylosis,"knee and spine together (""DJD knee spine""); djd knee still finds the knee"
-text,djd knee and spine,spondylosis,knee and spine together; djd knee still finds the knee
-text,djd spine knee,arthritis_knee,spine and knee together; djd spine still finds the spine
-text,djd spine and knee,arthritis_knee,spine and knee together; djd spine still finds the spine
+text,djd knee spine,spondylosis|arthritis_knee,"knee and spine together: both codes (one alias, two codes since 2026-11-17)"
+text,djd knee and spine,spondylosis|arthritis_knee,"knee and spine together: both codes (one alias, two codes since 2026-11-17)"
+text,djd spine knee,arthritis_knee|spondylosis,"knee and spine together: both codes (one alias, two codes since 2026-11-17)"
+text,djd spine and knee,arthritis_knee|spondylosis,"knee and spine together: both codes (one alias, two codes since 2026-11-17)"
 text,pivd,herniated_disk,
 text,disc prolapse,herniated_disk,
 text,slip disc,herniated_disk,
@@ -150,3 +150,39 @@ text,ckd,other_unlisted,kidney disease (serious illness): doctor decides
 text,chronic kidney disease,other_unlisted,kidney disease (serious illness): doctor decides
 text,kidney disease,other_unlisted,kidney disease (serious illness): doctor decides
 text,renal failure,other_unlisted,kidney disease (serious illness): doctor decides
+text,oa knees,arthritis_knee,plural
+text,knees pain,arthritis_knee,plural
+text,knee pains,arthritis_knee,plural
+text,osteoarthritis knee,arthritis_knee,
+text,lba,chronic_back_pain,low back ache
+text,lumbago,chronic_back_pain,covers acute lumbago
+text,lumbar pain,chronic_back_pain,
+text,radiating pain,neurological,nerve root involvement: doctor decides
+text,sciatic pain,neurological,nerve root involvement: doctor decides
+text,arthritis,other_unlisted,joint not named: doctor decides (a longer alias such as knee arthritis wins)
+text,osteoarthritis,other_unlisted,joint not named: doctor decides (a longer alias such as osteoarthritis knee wins)
+text,djd,other_unlisted,joint not named: doctor decides (djd knee / djd spine win)
+text,ht,bp_any,short for hypertension
+text,hand pain,hand_pain,
+text,hand joint pain,hand_pain,
+text,finger pain,hand_pain,
+text,fingers pain,hand_pain,
+text,finger joint pain,hand_pain,
+text,hand oa,hand_pain,
+text,oa hand,hand_pain,
+text,hand osteoarthritis,hand_pain,
+text,trigger finger,hand_pain,
+text,stiff fingers,hand_pain,
+text,eczema,skin_condition,
+text,dermatitis,skin_condition,"atopic, contact dermatitis"
+text,lsc,skin_condition,lichen simplex chronicus
+text,lichen simplex,skin_condition,
+text,psoriasis,skin_condition,same sweat and friction advice
+text,tinea,skin_condition,"fungal infection, any site"
+text,fungal infection,skin_condition,
+text,ringworm,skin_condition,
+text,ring worm,skin_condition,
+text,herpes zoster,skin_infection,shingles: rest until healed
+text,shingles,skin_infection,
+text,cellulitis,skin_infection,
+text,abscess,skin_infection,

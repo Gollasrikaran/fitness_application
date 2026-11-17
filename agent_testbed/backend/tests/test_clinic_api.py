@@ -657,3 +657,50 @@ def test_the_ai_gets_the_latest_prescription_only_if_recent():
 def test_sugar_lab_names_reach_the_reading_rules(name, key):
     assert clinic_api.lab_readings([{"name": name, "value": "312 mg/dL", "status": "High"}]) == {key: 312.0}
     assert clinic_api.lab_readings([{"name": name, "value": "17.3 mmol/L", "status": "High"}]) == {}  # other unit
+
+
+# The doctor's typed record wins over a scanned document's OCR (2026-11-17,
+# 0017c9d8): the scans were often the previous visit's prescription, or a form
+# heading read as a diagnosis. A scan fills a field only when nothing was typed.
+DOCUMENT_TIMELINE = """DATE: 2026-09-10
+  VISIT ID: v3
+  Chief Complaint (database): Eczema
+  Provisional Diagnosis (database): LSC
+  Confirmed Diagnosis (database): Not Documented
+  Supporting Document(s): 3 found
+    --- Document 2 ---
+    Provisional Diagnosis (Document 2): Eczema
+    Chief Complaint (Document 2): Eczema
+    --- Document 3 ---
+    Provisional Diagnosis (Document 3): BP pulse SPo2 Sign
+DATE: 2026-07-14
+  VISIT ID: v2
+  Chief Complaint (database): Fungal infection on leg and buttocks, itching
+  Provisional Diagnosis (database): Eczema
+  Confirmed Diagnosis (database): Not Documented
+    --- Document 1 ---
+    Clinical Impression (Document 1): Eczema
+    Chief Complaint (Document 1): Dark patches on leg and itching
+    --- Document 2 ---
+    Provisional Diagnosis (Document 2): HTn G6A2B1C0
+DATE: 2026-07-04
+  VISIT ID: v1
+  Chief Complaint (database): Not Documented
+  Provisional Diagnosis (database): Not Documented
+    --- Document 1 ---
+    Provisional Diagnosis (Document 1): Eczema
+    Chief Complaint (Document 1): Dark patches on leg
+"""
+
+
+def test_typed_record_wins_over_scanned_documents():
+    v3, v2, v1 = clinic_api.parse_timeline(DOCUMENT_TIMELINE)
+    assert (v3["complaint"], v3["provisional"]) == ("Eczema", "LSC")
+    assert (v2["complaint"], v2["provisional"]) == ("Fungal infection on leg and buttocks, itching", "Eczema")
+    assert v2["confirmed"] is None and "from_document" not in v2
+
+
+def test_a_scan_fills_a_field_nothing_was_typed_in():
+    v1 = clinic_api.parse_timeline(DOCUMENT_TIMELINE)[2]
+    assert (v1["complaint"], v1["provisional"]) == ("Dark patches on leg", "Eczema")
+    assert v1["from_document"] == ["provisional", "complaint"]

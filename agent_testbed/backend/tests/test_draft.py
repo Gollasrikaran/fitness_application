@@ -162,14 +162,24 @@ def test_walking_leads_an_ai_draft_even_when_the_ai_leaves_it_out(db):
                     ask_ai=ai_picking("slow_breathing", "march_in_place", "sit_to_stand"))
     kinds = [e["activity_type"] for e in p.exercises]
     assert p.source == "ai" and kinds[0] == "walk" and "march_in_place" not in kinds
-    assert "Walking: the main everyday exercise" in p.reason
+    assert p.exercises[0]["why"].startswith("BP under control: walking-type exercise lowers resting BP")
+
+
+def test_each_exercise_carries_its_own_why_not_the_reason(db):
+    """2026-11-17: the per-exercise lines moved from "Why this draft" to the
+    exercise itself; the reason keeps the AI's summary and the rule lines."""
+    p = build_draft(db, "p1", assessment(["bp_controlled"]), PATIENT,
+                    ask_ai=ai_picking("sit_to_stand", "walk", "slow_breathing"))
+    assert p.source == "ai" and all(e["why"] for e in p.exercises)
+    assert not any(line.startswith("- ") for line in p.reason.splitlines())
+    assert "Doses are the reviewed starting doses" in p.reason
 
 
 def test_walking_is_not_repeated_when_the_ai_already_picked_it(db):
     p = build_draft(db, "p1", assessment(["bp_controlled"]), PATIENT,
                     ask_ai=ai_picking("sit_to_stand", "walk", "slow_breathing"))
     assert [e["activity_type"] for e in p.exercises].count("walk") == 1
-    assert "Walking: helps" in p.reason  # the AI's own line is kept
+    assert p.exercises[0]["why"] == "helps"  # the AI's own line, no numbers (plan C)
 
 
 # ── A balanced plan (2026-11-16; PENDING_CHANGES.md 1, options B + D) ────────
@@ -181,7 +191,7 @@ def test_a_slot_the_ai_leaves_out_gets_its_best_fit(db):
     assert [e["activity_type"] for e in p.exercises] == ["walk", *(slots[s][0] for s in
                                                                    ("leg strength", "upper-body strength", "balance")),
                                                          "slow_breathing"]
-    assert "chosen by the safety rules" in p.reason
+    assert "lowers resting BP" in p.exercises[1]["why"]  # the slot's best fit, with our research line
 
 
 def test_ai_writing_names_instead_of_ids_keeps_the_ai_draft(db):
@@ -191,7 +201,7 @@ def test_ai_writing_names_instead_of_ids_keeps_the_ai_draft(db):
                     ask_ai=ai_picking("walking", "Sit to Stand", "wall-pushup", "slow_breathing"))
     assert p.source == "ai", p.reason
     assert [e["activity_type"] for e in p.exercises][:3] == ["walk", "sit_to_stand", "wall_pushup"]
-    assert "Walking: helps" in p.reason
+    assert p.exercises[0]["why"] == "helps"
 
 
 def test_6959e408_gets_a_balanced_plan(db):
@@ -255,3 +265,86 @@ def test_breathlessness_in_everyday_words_is_a_warning(db):
         ctx = {"conditions": {"doctor_recorded": [], "long_term_conditions": [], "health_history": []},
                "body": {}, "visits": [{"date": plans.date.today().isoformat(), "complaint": complaint}]}
         assert {w["label"] for w in rule_findings(ctx, ref).warnings} == {"Breathlessness"}, complaint
+
+
+# ── The "why" under each exercise (2026-11-17) ──────────────────────────────
+
+def test_without_an_ai_line_and_evidence_the_rules_line_names_the_part_of_the_plan(db):
+    slots = slot_options(db, ["pcos"])  # no research lines for PCOD
+    p = build_draft(db, "p1", assessment(["pcos"]), PATIENT, ask_ai=ai_picking(slots["breathing"][0]))
+    assert p.source == "ai"
+    assert p.exercises[-1]["why"] == "helps"  # the AI's own line
+    assert p.exercises[1]["why"] == "Leg strength: the best-ranked option for this part of the plan (chosen by the safety rules)."
+    assert p.exercises[0]["why"].startswith("Main exercise of the plan")
+
+
+def ai_with_whys(whys):
+    def ask(_assessment, _patient, _allowed):
+        return AIDraft(exercises=[AIPick(activity_type=k, why=w) for k, w in whys.items()],
+                       instructions="Go slowly.", reason="Gentle start.")
+    return ask
+
+
+def test_the_ai_line_may_quote_only_numbers_from_the_evidence_or_the_patient(db):
+    """Plan C (2026-11-17): the AI writes every why, with our research as its
+    only source of health facts. A number it made up drops its line."""
+    p = build_draft(db, "p1", assessment(["bp_controlled"]), {"age": 57, "sex": "M", "bmi": 31.2},
+                    ask_ai=ai_with_whys({
+                        "walk": "Walking lowers resting BP by about 4-7 mmHg, which suits his BP.",  # from the evidence
+                        "sit_to_stand": "Leg strength lowers BP by 12 mmHg.",  # invented: dropped
+                        "slow_breathing": "Calming breathing for a 57-year-old with BMI 31.2."}))  # his own numbers
+    why = {e["activity_type"]: e["why"] for e in p.exercises}
+    assert why["walk"] == "Walking lowers resting BP by about 4-7 mmHg, which suits his BP."
+    assert why["sit_to_stand"].startswith("BP under control: strength exercise with movement")  # our line instead
+    assert why["slow_breathing"] == "Calming breathing for a 57-year-old with BMI 31.2."
+
+
+def test_evidence_lines_use_short_condition_names(db):
+    allowed, _ = plans.candidates(db, ["skin_condition"], 40, 24)
+    walk = next(e for e in allowed if e["activity_type"] == "walk")
+    assert walk["benefits"] == ["Skin problem: allowed as usual; walk at a cool time of day to limit sweat and itch"]
+
+
+def test_skin_advice_separates_eczema_and_fungal_infection(db):
+    notes = db.get(Condition, "skin_condition").notes
+    assert "dry well" in notes and "Eczema: put on your moisturiser" in notes and "keep the area dry" in notes
+
+
+def test_the_ai_gets_the_conditions_advice(db):
+    seen = {}
+
+    def ask(assessment, patient, allowed):
+        seen.update(patient)
+        return ai_picking("walk")(assessment, patient, allowed)
+
+    build_draft(db, "p1", assessment(["skin_condition"]), PATIENT, ask_ai=ask)
+    assert "loose cotton" in seen["condition_notes"]["Skin problem (eczema, fungal infection)"]
+
+
+def test_every_research_line_belongs_to_a_safety_rule(db):
+    from store.seed import _rows
+    lines = list(_rows("exercise_benefits.csv"))
+    assert lines and all(r["benefit"].strip() and r["source"].strip() for r in lines)
+    for r in lines:
+        rule = db.scalars(select(SafetyRule).where(SafetyRule.condition_code == r["condition_code"],
+                                                   SafetyRule.activity_type == r["activity_type"])).one()
+        assert rule.benefit == r["benefit"].strip()
+
+
+def test_part_names_from_the_ai_mean_that_parts_best_fit(db):
+    """6959e408 (2026-11-17): the AI returned "leg strength", "upper-body
+    strength", "breathing" instead of exercises, and the AI draft was lost."""
+    slots = slot_options(db, ["bp_controlled", "obesity"], age=57, bmi=31.2)
+    p = build_draft(db, "p1", assessment(["bp_controlled", "obesity"]), {"age": 57, "sex": "M", "bmi": 31.2},
+                    ask_ai=ai_picking("walk", "leg strength", "upper-body strength", "balance", "breathing"))
+    assert p.source == "ai", p.reason
+    assert [e["activity_type"] for e in p.exercises] == ["walk", *(slots[s][0] for s in
+                                                                   ("leg strength", "upper-body strength", "balance",
+                                                                    "breathing"))]
+
+
+def test_a_rules_draft_has_a_why_under_each_exercise_too(db):
+    p = build_draft(db, "p1", assessment(["bp_controlled"]), PATIENT, ask_ai=ai_picking("no_such_exercise"))
+    assert p.source == "rules"
+    assert all(e["why"] for e in p.exercises)
+    assert "lowers resting BP" in p.exercises[0]["why"]  # our research line (no AI line)

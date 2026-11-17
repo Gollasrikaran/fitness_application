@@ -269,6 +269,7 @@ function ReviewCard({ p, patientId, assessment, doctor, onChanged }) {
                 </span>
               )}
             </div>
+            {e.why && <div className="small muted why">Why: {e.why}</div>}
             <input className="small" value={e.notes} placeholder="Note for the patient (optional)"
                    onChange={(ev) => update(i, "notes", ev.target.value)} />
             {(warnings[e.activity_type] || []).map((w, j) => (

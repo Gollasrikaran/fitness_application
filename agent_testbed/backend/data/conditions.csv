@@ -1,6 +1,6 @@
 condition_code,display_name,bucket,display_order,notes
 none,None of these,supported,10,Standard program. No exclusions applied.
-chronic_back_pain,Long-standing back pain,supported,20,
+chronic_back_pain,Long-standing back pain,supported,20,"Keep active; bed rest doesn't help. Stop and tell your doctor if pain spreads below the knee, or the leg tingles or feels weak."
 herniated_disk,Slip disc,supported,30,
 degenerative_disc,Disc wear and tear,supported,40,
 spinal_stenosis,Nerve pinching in the spine,supported,50,
@@ -13,13 +13,15 @@ gout,Uric acid problem,supported,110,
 prediabetes,Prediabetes,supported,115,No specific exercise restriction identified; general fitness activity is protective.
 high_cholesterol,Cholesterol problem,supported,120,No specific exercise restriction identified.
 obesity,Overweight,supported,125,Favor lower-impact activity while building fitness; see safety grid for running.
-arthritis_knee,Knee pain,supported,130,Favor lower-impact activity; avoid deep knee flexion under load.
+arthritis_knee,Knee pain,supported,130,"Favor lower-impact activity. Some knee pain during exercise is fine if it settles by the next day; if it is worse the next day, do less. Avoid kneeling and deep squatting."
 pcos,PCOD,supported,135,No specific exercise restriction identified.
 depression,Feeling low,supported,140,No physical exercise restriction identified.
 anxiety,Tension,supported,145,No physical exercise restriction identified.
 diabetes_controlled,Sugar under control,supported,150,Diabetes managed with medicine/diet and no known complications. Favor lower-impact activity; avoid sudden intense exertion.
 bp_controlled,BP under control,supported,155,High blood pressure managed with medicine. Favor lower-impact activity; avoid sudden intense exertion.
 asthma_controlled,Asthma under control,supported,160,"Asthma with no recent breathlessness or wheeze, no emergency visit and SpO2 94% or above. Favour walking, chair and standing strength, and breathing exercises; always warm up; stop and rest if wheezy or tight in the chest; avoid smoke, dust and cold air."
+hand_pain,Hand or finger pain,supported,95,Hand exercises daily; the benefit lasts only while they continue. Move slowly; a little ache that settles within an hour is fine. Numbness or tingling in the hand: doctor first.
+skin_condition,"Skin problem (eczema, fungal infection)",supported,165,"Exercise when it is cool, in loose cotton clothes. Afterwards wash with lukewarm water, dry well (skin folds, between the toes) and change into dry clothes; don't share towels. Eczema: put on your moisturiser after drying. Fungal infection (tinea, ringworm): keep the area dry; no cream on it unless the doctor prescribed one. If the skin is broken or oozing, do lighter exercise and tell your doctor."
 diabetes,Sugar not under control,refer,901,Safety depends on control status and complications (eye/foot/nerve) that a single checkbox cannot capture — refer to a doctor.
 high_bp,BP not under control,refer,903,Uncontrolled blood pressure with intense exertion carries real risk — refer to a doctor.
 asthma_uncontrolled,Asthma not under control,refer,904,"Breathlessness or wheeze in the last 6 months, an emergency visit, or SpO2 below 94%: refer to a doctor."
@@ -29,4 +31,5 @@ pregnancy,Pregnant / recently had a baby,refer,910,Different guidance entirely; 
 recent_surgery,Had an operation recently,refer,920,
 acute_injury,Fresh injury (still healing),refer,930,
 neurological,Nerve-related problem,refer,940,"Multiple sclerosis, neuropathy, and similar."
+skin_infection,Active skin infection or shingles,refer,945,"Shingles, cellulitis or an abscess: rest until it has healed; a doctor writes the plan."
 other_unlisted,Something else / not listed,refer,999,FAIL-CLOSED DEFAULT. Do not remove this row.
