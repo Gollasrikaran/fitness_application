@@ -54,6 +54,7 @@ class Exercise(Base):
     breath_hold: Mapped[bool] = mapped_column(Boolean, default=False)  # people tend to hold their breath (straining or holding)
     position: Mapped[str] = mapped_column(String(16), default="")  # standing | chair | floor
     impact: Mapped[str] = mapped_column(String(8), default="")  # low | high
+    body_part: Mapped[str] = mapped_column(String(8), default="")  # strength only: upper | lower | core (the plan's slots)
     # For the patient's plan page, from the reference DB
     instructions: Mapped[list] = mapped_column(JSON, default=list)  # steps, in order (reference DB, else our CSV)
     images: Mapped[list] = mapped_column(JSON, default=list)  # demo image URLs

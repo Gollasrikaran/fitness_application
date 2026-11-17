@@ -2,10 +2,12 @@
 phase 5). Run when a doctor clicks "Generate plan".
 
   severe      a "doctor must write the plan" item: no exercises, no AI
-  not severe  the AI picks and orders exercises from store.plans.candidates()
-              (the ones the safety grid allows for every condition) and
-              writes the reasons. Code sets the doses, never the AI, and
-              store.plans.violations() checks the draft.
+  not severe  a balanced plan (store.plans.plan_slots, 2026-11-16): walking
+              first, then leg strength, upper-body strength, balance and
+              breathing, each from the exercises the safety grid allows for
+              every condition. The AI picks one of each slot's best few and
+              writes the reasons. Code sets the doses and the order, never
+              the AI, and store.plans.violations() checks the draft.
   fallback    if the AI fails or breaks a rule, the rule-built
               store.plans.starter_exercises() draft is used instead.
 
@@ -34,8 +36,6 @@ from store.models import PlanProposal
 
 log = logging.getLogger("agent.draft")
 
-MIN_EXERCISES = 3
-
 
 class AIPick(BaseModel):
     activity_type: str
@@ -48,17 +48,21 @@ class AIDraft(BaseModel):
     reason: str
 
 
+def _option(e: dict) -> str:
+    return (f"{e['activity_type']}: {e['name']}, {e['sets']} x {e['amount']:g} {e['unit']}"
+            + (f" (CAUTION: {e['notes']})" if e["notes"] else ""))
+
+
 def _ask_ai(assessment: dict, patient: dict, allowed: list[dict]) -> AIDraft:
-    lines = "\n".join(f"- {e['activity_type']}: {e['name']}, {e['sets']} x {e['amount']:g} {e['unit']}"
-                      + (f" (CAUTION: {e['notes']})" if e["notes"] else "") for e in allowed)
+    slots = plan_store.plan_slots(allowed)
+    lines = "\n".join(f"{i}. {name}:\n" + "\n".join(f"   - {_option(e)}" + ("  [best fit]" if j == 0 else "")
+                                                  for j, e in enumerate(options))
+                      for i, (name, options) in enumerate(slots, 1))
     core = plan_store.core_exercise(allowed)
-    others = [e for e in allowed if e["activity_type"] not in plan_store.CORE_AEROBIC] if core else allowed
-    high = min(plan_store.MAX_EXERCISES - bool(core), len(others))
-    low = min(MIN_EXERCISES - bool(core), high)
-    core_line = (f"\nCORE: {core['activity_type']} ({core['name']}) is the main exercise of the plan; the rules put it "
+    core_line = (f"CORE: {core['activity_type']} ({core['name']}) is the main exercise of the plan; the rules put it "
                  f"first themselves. Don't return it or any other of {', '.join(plan_store.CORE_AEROBIC)}.\n"
                  if core else "")
-    prompt = DRAFT.format(allowed=lines, core=core_line, low=low, high=high)
+    prompt = DRAFT.format(slots=lines, core=core_line, count=len(slots))
     about = {**patient, "problem": assessment["problem"], "body_area": assessment["body_area"],
              "conditions": [{"code": c["code"], "name": c["name"]} for c in assessment["conditions"]],
              "concerns": assessment["concerns"]}
@@ -67,39 +71,50 @@ def _ask_ai(assessment: dict, patient: dict, allowed: list[dict]) -> AIDraft:
                          HumanMessage(content="PATIENT\n" + json.dumps(about, ensure_ascii=False, default=str))])
 
 
-def _from_ai(answer: AIDraft, allowed: list[dict]) -> tuple[list[dict], list[str], list[str]]:
-    """The AI's picks at the rules' doses. Returns (exercises, why lines,
-    problems). A pick outside the allowed list is a problem, never fixed up."""
-    by_type = {e["activity_type"]: e for e in allowed}
-    exercises, whys, problems = [], [], []
-    for pick in answer.exercises:
-        e = by_type.get(pick.activity_type)
-        if e is None:
-            problems.append(f"{pick.activity_type}: not allowed for this patient")
-        elif any(x["activity_type"] == e["activity_type"] for x in exercises):
-            problems.append(f"{e['name']}: listed twice")
-        else:
-            exercises.append(plan_store.plan_entry(e))
-            whys.append(f"- {e['name']}: {pick.why.strip()}")
-    if not exercises and not problems:
-        problems.append("no exercises picked")
-    if not answer.instructions.strip():
-        problems.append("no instructions for the patient")
-    return (*_core_first(exercises, whys, allowed), problems)
+def _key(text: str) -> str:
+    """"Sit to Stand", "sit_to_stand", "sit-to-stand" -> "sittostand"."""
+    return "".join(ch for ch in text.lower() if ch.isalnum())
 
 
 CORE_WHY = "the main everyday exercise of the plan (always first, set by the safety rules)."
+SLOT_WHY = "the best fit for the patient's conditions in this part of the plan (chosen by the safety rules)."
 
 
-def _core_first(exercises: list[dict], whys: list[str], allowed: list[dict]) -> tuple[list[dict], list[str]]:
-    """Walking first in every AI draft, whatever the AI picked (plan_store.core_first).
-    Too many picks stay as they are, so the rules check rejects them."""
-    if not exercises or len(exercises) > plan_store.MAX_EXERCISES:
-        return exercises, whys
-    why = dict(zip((x["activity_type"] for x in exercises), whys))
-    kept = plan_store.core_first(allowed, exercises, plan_store.MAX_EXERCISES)
-    return ([plan_store.plan_entry(x) for x in kept],
-            [why.get(x["activity_type"], f"- {x['name']}: {CORE_WHY}") for x in kept])
+def _from_ai(answer: AIDraft, allowed: list[dict]) -> tuple[list[dict], list[str], list[str]]:
+    """The balanced plan with the AI's choice in each slot, at the rules'
+    doses (store.plans.balanced_plan). Returns (exercises, why lines,
+    problems). A pick that is no option of any slot, or a second pick for one
+    slot, is a problem, never fixed up; a slot the AI left out gets its best
+    fit. The order is the plan's: walking first, breathing last."""
+    slots = plan_store.plan_slots(allowed)
+    slot_of = {e["activity_type"]: name for name, options in slots for e in options}
+    core = plan_store.core_exercise(allowed)
+    # The AI sometimes writes the name instead of the id ("walking" for walk,
+    # 6959e408 on 2026-11-16): an exercise's name means that exercise.
+    by_name = {_key(e["name"]): e["activity_type"] for e in allowed}
+    picks, whys, problems = {}, {}, []
+    for pick in answer.exercises:
+        kind = pick.activity_type.strip()
+        kind = kind if kind in slot_of or kind in plan_store.CORE_AEROBIC else by_name.get(_key(kind), kind)
+        if core and kind == core["activity_type"]:
+            whys[kind] = pick.why.strip()
+        elif kind in plan_store.CORE_AEROBIC:
+            continue  # another walking-type exercise: the core already covers it
+        elif kind not in slot_of:
+            problems.append(f"{kind}: not one of the options for this patient")
+        elif slot_of[kind] in picks:
+            problems.append(f"{kind}: a second pick for the {slot_of[kind]} part of the plan")
+        else:
+            picks[slot_of[kind]] = kind
+            whys[kind] = pick.why.strip()
+    if not answer.exercises:
+        problems.append("no exercises picked")
+    if not answer.instructions.strip():
+        problems.append("no instructions for the patient")
+    chosen = plan_store.balanced_plan(allowed, picks)
+    lines = [f"- {e['name']}: {whys.get(e['activity_type']) or (CORE_WHY if e is core else SLOT_WHY)}"
+             for e in chosen]
+    return [plan_store.plan_entry(e) for e in chosen], lines, problems
 
 
 def build_draft(db: Session, patient_id: str, assessment: dict, patient: dict,

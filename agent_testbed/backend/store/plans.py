@@ -33,11 +33,6 @@ from sqlalchemy.orm import Session
 
 from store.models import Assessment, Condition, Exercise, Plan, PlanProposal, ReadingRule, SafetyRule
 
-EXERCISES_BY_EXPERIENCE = {"beginner": 4, "intermediate": 5, "active": 7}
-# The clinic record doesn't say how active someone is: start everyone as a
-# beginner (the most moderate plan). The doctor can add more.
-DEFAULT_EXPERIENCE = "beginner"
-
 # PROVISIONAL thresholds so we can build; the doctor confirms or replaces them.
 OLDER_AGE = 60         # at or above: high-impact and floor exercises left out, doses one step lower
 HIGH_BMI = 30.0        # at or above: high-impact and floor exercises left out (Exercise.impact, Exercise.position)
@@ -220,9 +215,13 @@ def candidates(db: Session, codes: list[str], age: int | None,
         amount, step = e["default_amount"], by_type[e["activity_type"]].progression_step
         if older and amount - step >= step - 1e-9:
             amount = round(amount - step, 2)
+        ex = by_type[e["activity_type"]]
         out.append({"activity_type": e["activity_type"], "name": e["display_name"], "unit": e["unit"],
                     "sets": e["default_sets"], "amount": amount, "notes": " ".join(e["notes"]),
-                    "verdict": e["verdict"]})
+                    "verdict": e["verdict"],
+                    # for plan_slots(): the exercise's type, body part and usefulness for these conditions
+                    "exercise_type": ex.exercise_type, "body_part": ex.body_part or "",
+                    "rank": (ranks.get(e["activity_type"]) or 99, ex.priority_order)})
     if older and out:
         rules.append(f"Doses one step below the defaults: age {age} >= {OLDER_AGE} (provisional rule)")
     return out, rules
@@ -234,13 +233,61 @@ def plan_entry(e: dict) -> dict:
 
 
 def starter_exercises(db: Session, codes: list[str], age: int | None, bmi: float | None,
-                      experience: str = DEFAULT_EXPERIENCE,
                       readings: dict | None = None) -> tuple[list[dict], list[str]]:
-    """The rule-built plan (no AI), and a line per provisional profile rule
-    that changed it."""
+    """The rule-built plan (no AI): the balanced plan of plan_slots(), each
+    slot's best fit; and a line per provisional profile rule that changed it."""
     allowed, rules = candidates(db, codes, age, bmi, readings)
-    count = EXERCISES_BY_EXPERIENCE.get(experience, EXERCISES_BY_EXPERIENCE["beginner"])
-    return [plan_entry(e) for e in core_first(allowed, allowed, count)], rules
+    return [plan_entry(e) for e in balanced_plan(allowed)], rules
+
+
+# ── A balanced plan (2026-11-16; EXERCISE_FIT_TRACKER.md step 5) ────────────
+# Every draft: walking-type first (CORE_AEROBIC), then one exercise per slot,
+# breathing last as the cool-down. Holding exercises (isometric) are never a
+# slot: they raise BP; the doctor can still add them.
+SLOTS = (
+    ("leg strength", lambda e: e["exercise_type"] == "strength" and e["body_part"] in ("lower", "core")),
+    ("upper-body strength", lambda e: e["exercise_type"] == "strength" and e["body_part"] == "upper"),
+    ("balance", lambda e: e["exercise_type"] == "balance"),
+    ("breathing", lambda e: e["exercise_type"] == "breathing"),
+)
+# When the balance slot has nothing allowed, a gentle movement takes its place.
+SLOT_STANDINS = {"balance": lambda e: e["exercise_type"] in ("mobility", "stretch")}
+OPTIONS_PER_SLOT = 3  # the AI may choose among the best few of a slot
+
+
+def plan_slots(allowed: list[dict]) -> list[tuple[str, list[dict]]]:
+    """The plan's slots after the core exercise: (slot name, options), best
+    fit first. Within a slot the usefulness rank decides, "safe" or "modify"
+    alike (a "modify" keeps its caution note). An empty slot is left out;
+    the plan is then filled up to MAX_EXERCISES with the best-ranked other
+    allowed exercises ("other"), never a holding one or another walking one."""
+    pool = [e for e in allowed if e["activity_type"] not in CORE_AEROBIC and e["exercise_type"] != "isometric"]
+    by_rank = lambda options: sorted(options, key=lambda e: e["rank"])
+    slots, used = [], set()
+    for name, fits in SLOTS:
+        options = by_rank(e for e in pool if fits(e))
+        if not options and name in SLOT_STANDINS:
+            options = by_rank(e for e in pool if SLOT_STANDINS[name](e))
+        options = [e for e in options if e["activity_type"] not in used][:OPTIONS_PER_SLOT]
+        if options:
+            slots.append((name, options))
+            used.update(e["activity_type"] for e in options)  # offered once only: no repeats across slots
+    room = MAX_EXERCISES - bool(core_exercise(allowed)) - len(slots)
+    for e in by_rank(e for e in pool if e["activity_type"] not in used)[:max(room, 0)]:
+        slots.insert(len(slots) - (slots[-1][0] == "breathing" if slots else 0), ("other", [e]))  # breathing stays last
+        used.add(e["activity_type"])
+    return slots
+
+
+def balanced_plan(allowed: list[dict], picks: dict[str, str] | None = None) -> list[dict]:
+    """The core exercise, then one exercise per slot: `picks` (slot name ->
+    activity_type, one of that slot's options) or the slot's best fit."""
+    core = core_exercise(allowed)
+    chosen = [core] if core else []
+    for name, options in plan_slots(allowed):
+        pick = (picks or {}).get(name)
+        chosen.append(next((e for e in options if e["activity_type"] == pick), options[0]))
+    return chosen[:MAX_EXERCISES]
 
 
 def core_exercise(allowed: list[dict]) -> dict | None:
@@ -248,14 +295,6 @@ def core_exercise(allowed: list[dict]) -> dict | None:
     CORE_AEROBIC the patient is allowed, or None."""
     return next((e for kind in CORE_AEROBIC for e in allowed if e["activity_type"] == kind), None)
 
-
-def core_first(allowed: list[dict], picks: list[dict], limit: int) -> list[dict]:
-    """The picks with the core exercise first and the other walking-type ones
-    left out, at most `limit`."""
-    core = core_exercise(allowed)
-    if core is None:
-        return picks[:limit]
-    return [core, *(p for p in picks if p["activity_type"] not in CORE_AEROBIC)][:limit]
 
 
 def violations(db: Session, exercises: list[dict], codes: list[str],

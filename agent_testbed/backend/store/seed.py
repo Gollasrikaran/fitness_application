@@ -179,6 +179,7 @@ def _from_csv() -> tuple[dict, dict, dict]:
         "instructions": [s.strip() for s in (r.get("instructions") or "").split("|") if s.strip()],
         "images": [u.strip() for u in (r.get("images") or "").split("|") if u.strip()],
         **{k: (r.get(k) or "").strip() for k in EXERCISE_PROPERTIES},
+        "body_part": (r.get("body_part") or "").strip(),  # strength exercises: upper | lower | core
         "breath_hold": (r.get("breath_hold") or "").strip().lower() == "true"}
         for r in _rows("activity_taxonomy.csv")}
     for e in exercises.values():

@@ -98,7 +98,8 @@ def test_rules_draft_for_underweight_starts_with_walking_then_strength(db):
     exercises, _ = plans.starter_exercises(db, ["none"], 50, 17.3)
     types = {e.activity_type: e.exercise_type for e in db.scalars(select(Exercise))}
     assert exercises[0]["activity_type"] == "walk"
-    assert all(types[x["activity_type"]] in ("strength", "balance") for x in exercises[1:])
+    # The balanced plan (2026-11-16): strength and balance right after walking, breathing last (cool-down).
+    assert [types[x["activity_type"]] for x in exercises[1:]] == ["strength", "strength", "balance", "breathing"]
 
 
 def test_normal_bmi_changes_nothing(db):
