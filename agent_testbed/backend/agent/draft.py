@@ -23,13 +23,12 @@ import logging
 import re
 from collections.abc import Callable
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from agent.assess import run_assessment
-from agent.llm import chat_model
+from agent.llm import ask_structured
 from agent.prompts import DRAFT
 from app.source import clinic
 from store import plans as plan_store
@@ -68,12 +67,18 @@ def _ask_ai(assessment: dict, patient: dict, allowed: list[dict]) -> AIDraft:
                  + (f" (EVIDENCE: {'; '.join(core['benefits'])})" if core.get("benefits") else "")
                  + f"; return no other of {', '.join(plan_store.CORE_AEROBIC)}.\n" if core else "")
     prompt = DRAFT.format(slots=lines, core=core_line, count=len(slots))
-    about = {**patient, "problem": assessment["problem"], "body_area": assessment["body_area"],
-             "conditions": [{"code": c["code"], "name": c["name"]} for c in assessment["conditions"]],
-             "concerns": assessment["concerns"]}
-    model = chat_model(temperature=0, max_tokens=800).with_structured_output(AIDraft)
-    return model.invoke([SystemMessage(content=prompt),
-                         HumanMessage(content="PATIENT\n" + json.dumps(about, ensure_ascii=False, default=str))])
+    about = patient_for_ai(assessment, patient)
+    return ask_structured(prompt, "PATIENT\n" + json.dumps(about, ensure_ascii=False, default=str), AIDraft)
+
+
+def patient_for_ai(assessment: dict, patient: dict) -> dict:
+    """What the draft AI reads about the patient. The assessment's medicine
+    notes ("Medicine: ...") are left out: they are for the doctor only, and
+    the plan is never chosen or explained by medicines (6959e408, 2026-11-18:
+    the AI justified a balance exercise with cetirizine's drowsiness)."""
+    return {**patient, "problem": assessment["problem"], "body_area": assessment["body_area"],
+            "conditions": [{"code": c["code"], "name": c["name"]} for c in assessment["conditions"]],
+            "concerns": [c for c in assessment["concerns"] if not c.lower().startswith("medicine:")]}
 
 
 def _key(text: str) -> str:

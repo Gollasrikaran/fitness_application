@@ -199,9 +199,10 @@ def test_no_ai_answer_lowers_severity_or_removes_a_condition(ref):
                        [Finding(c, "ai", "visit 2026-10-20, diagnosis", "x") for c in ai_codes])
         assert RANK[out["severity"]] >= RANK[baseline["severity"]]
         assert set(baseline["severe_reasons"]) <= set(out["severe_reasons"])
-        # A condition the rules found stays, or only gets stricter (controlled -> not controlled).
+        # A condition the rules found stays, or only gets stricter (controlled -> not controlled;
+        # underactive thyroid -> overactive, 2026-11-18).
         stricter = {"bp_controlled": "high_bp", "diabetes_controlled": "diabetes",
-                    "asthma_controlled": "asthma_uncontrolled"}
+                    "asthma_controlled": "asthma_uncontrolled", "hypothyroid": "hyperthyroid"}
         for code in set(baseline["codes"]) - {"none"}:
             assert code in out["codes"] or stricter.get(code) in out["codes"]
         if any(ref.conditions[c]["bucket"] == "refer" for c in out["codes"] if c != "none"):

@@ -127,7 +127,7 @@ def reading_rules() -> list[dict]:
 
 
 # Not condition codes: the safety rules decide controlled or not (agent/conditions.py).
-ALIAS_MARKERS = {"bp_any", "diabetes_any", "asthma_any"}
+ALIAS_MARKERS = {"bp_any", "diabetes_any", "asthma_any", "thyroid_any"}  # thyroid_any: type not recorded (research/THYROID.md)
 
 
 def time_windows(conditions: dict) -> list[dict]:

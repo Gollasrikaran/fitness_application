@@ -12,7 +12,8 @@ NEW = ["calf_raise", "seated_knee_extension", "single_leg_stand", "heel_toe_walk
 DISC = ["herniated_disk", "degenerative_disc", "spinal_stenosis"]
 RERANKED = {"bp_controlled", "diabetes_controlled", "prediabetes", "obesity", "arthritis_knee", "arthritis_hip",
             "spondylosis", "asthma_controlled",  # asthma ranked from scratch 2026-10-30 (test_asthma.py)
-            "chronic_back_pain"}  # back pain ranked from the research 2026-11-17 (test_joint_hand_skin.py)
+            "chronic_back_pain",  # back pain ranked from the research 2026-11-17 (test_joint_hand_skin.py)
+            "hypothyroid"}  # ranked from scratch 2026-11-18 (test_thyroid.py)
 NORMAL = {"bp": {"sys": 125.0, "dia": 80.0, "date": "2026-10-20"}}
 
 

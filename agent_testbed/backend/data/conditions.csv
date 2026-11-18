@@ -33,3 +33,5 @@ acute_injury,Fresh injury (still healing),refer,930,
 neurological,Nerve-related problem,refer,940,"Multiple sclerosis, neuropathy, and similar."
 skin_infection,Active skin infection or shingles,refer,945,"Shingles, cellulitis or an abscess: rest until it has healed; a doctor writes the plan."
 other_unlisted,Something else / not listed,refer,999,FAIL-CLOSED DEFAULT. Do not remove this row.
+hypothyroid,Underactive thyroid,supported,165,"Tiredness, stiff muscles and cramps are common: start gently and build up slowly, and warm up first. Some muscle ache that settles by the next day is fine. Stop and tell your doctor about a racing heartbeat, chest pain or tingling in the hands."
+hyperthyroid,Overactive thyroid,refer,950,"A doctor writes the plan: until it is controlled, a fast or irregular heartbeat, weak muscles and weaker bones make strenuous exercise unsafe. Once controlled: walking and light strength first; weight-bearing and balance exercises help the bones."

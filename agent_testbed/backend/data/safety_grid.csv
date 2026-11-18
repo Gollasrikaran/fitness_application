@@ -758,3 +758,36 @@ skin_condition,thumb_touch,safe,"Gentle, low-load movement with no specific conc
 skin_condition,towel_squeeze,safe,"Gentle, low-load movement with no specific concern for this condition.",31,product-team (not clinically reviewed),2026-11-17
 skin_condition,wall_pelvic_tilt,safe,"Gentle, low-load movement with no specific concern for this condition.",32,product-team (not clinically reviewed),2026-11-17
 skin_condition,mini_squat,safe,"Gentle, low-load movement with no specific concern for this condition.",33,product-team (not clinically reviewed),2026-11-17
+hypothyroid,walk,safe,"Gentle, low-load movement with no specific concern for this condition.",1,product-team (not clinically reviewed),2026-11-18
+hypothyroid,march_in_place,safe,"Gentle, low-load movement with no specific concern for this condition.",2,product-team (not clinically reviewed),2026-11-18
+hypothyroid,sit_to_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",3,product-team (not clinically reviewed),2026-11-18
+hypothyroid,wall_pushup,safe,"Gentle, low-load movement with no specific concern for this condition.",4,product-team (not clinically reviewed),2026-11-18
+hypothyroid,mini_squat,safe,"Gentle, low-load movement with no specific concern for this condition.",5,product-team (not clinically reviewed),2026-11-18
+hypothyroid,calf_raise,safe,"Gentle, low-load movement with no specific concern for this condition.",6,product-team (not clinically reviewed),2026-11-18
+hypothyroid,standing_hip_abduction,safe,"Gentle, low-load movement with no specific concern for this condition.",7,product-team (not clinically reviewed),2026-11-18
+hypothyroid,seated_knee_extension,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-11-18
+hypothyroid,single_leg_stand,safe,"Gentle, low-load movement with no specific concern for this condition.",9,product-team (not clinically reviewed),2026-11-18
+hypothyroid,heel_toe_walk,safe,"Gentle, low-load movement with no specific concern for this condition.",10,product-team (not clinically reviewed),2026-11-18
+hypothyroid,slow_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",11,product-team (not clinically reviewed),2026-11-18
+hypothyroid,wall_pelvic_tilt,safe,"Gentle, low-load movement with no specific concern for this condition.",12,product-team (not clinically reviewed),2026-11-18
+hypothyroid,seated_march,safe,"Gentle, low-load movement with no specific concern for this condition.",13,product-team (not clinically reviewed),2026-11-18
+hypothyroid,belly_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",14,product-team (not clinically reviewed),2026-11-18
+hypothyroid,calf_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",15,product-team (not clinically reviewed),2026-11-18
+hypothyroid,chair_hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",16,product-team (not clinically reviewed),2026-11-18
+hypothyroid,shoulder_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",17,product-team (not clinically reviewed),2026-11-18
+hypothyroid,ankle_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",18,product-team (not clinically reviewed),2026-11-18
+hypothyroid,glute_bridge,modify,Breathe out as you lift; don't hold your breath.,19,product-team (not clinically reviewed),2026-11-18
+hypothyroid,dead_bug,modify,Breathe out as you move; don't hold your breath.,20,product-team (not clinically reviewed),2026-11-18
+hypothyroid,lower_back_side_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",21,product-team (not clinically reviewed),2026-11-18
+hypothyroid,hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",22,product-team (not clinically reviewed),2026-11-18
+hypothyroid,quad_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",23,product-team (not clinically reviewed),2026-11-18
+hypothyroid,chin_tuck,safe,"Gentle, low-load movement with no specific concern for this condition.",24,product-team (not clinically reviewed),2026-11-18
+hypothyroid,pursed_lip_breathing,safe,"Gentle, low-load movement with no specific concern for this condition.",25,product-team (not clinically reviewed),2026-11-18
+hypothyroid,wrist_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",26,product-team (not clinically reviewed),2026-11-18
+hypothyroid,neck_isometric,modify,"Short holds, breathing normally; don't hold your breath.",27,product-team (not clinically reviewed),2026-11-18
+hypothyroid,wall_sit,modify,"Short, shallow holds, breathing normally; don't hold your breath.",28,product-team (not clinically reviewed),2026-11-18
+hypothyroid,running,modify,Only once walking feels easy. Tiredness and muscle cramps are common until the thyroid is well treated: walk instead on those days.,29,product-team (not clinically reviewed),2026-11-18
+hypothyroid,towel_squeeze,safe,"Gentle, low-load movement with no specific concern for this condition.",30,product-team (not clinically reviewed),2026-11-18
+hypothyroid,fist_open,safe,"Gentle, low-load movement with no specific concern for this condition.",31,product-team (not clinically reviewed),2026-11-18
+hypothyroid,finger_spread,safe,"Gentle, low-load movement with no specific concern for this condition.",32,product-team (not clinically reviewed),2026-11-18
+hypothyroid,thumb_touch,safe,"Gentle, low-load movement with no specific concern for this condition.",33,product-team (not clinically reviewed),2026-11-18

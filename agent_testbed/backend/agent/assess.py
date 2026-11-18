@@ -21,11 +21,10 @@ import re
 from datetime import date
 from typing import Literal
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from agent.conditions import Finding, RuleResult, has_phrase, is_recent, load_reference, rule_findings, words
-from agent.llm import MODEL, chat_model
+from agent.llm import MODEL, ask_structured
 from agent.prompts import ASSESS
 from agent.routing import finalize
 from app.source import clinic
@@ -143,17 +142,17 @@ def _ask_ai(record: dict, ref, rules: RuleResult, today: date, flags: list[str] 
     # bp_any / diabetes_any are the rules' "controlled or not, to be decided" markers.
     shown = {"bp_any": "blood pressure (controlled or not: decided from vital flags)",
              "diabetes_any": "diabetes (controlled or not: decided from vital flags)",
-             "asthma_any": "asthma (controlled or not: decided by the rules)"}
+             "asthma_any": "asthma (controlled or not: decided by the rules)",
+             "thyroid_any": "thyroid, type not recorded (underactive or overactive: decided by the rules)"}
     found = "\n".join(sorted({f"- {shown.get(f.code, f.code)}: {f.where}: \"{f.quote}\""
                               for f in rules.findings})) or "- nothing"
     windows = ", ".join(f"{code} {days}" for (code, src), days in sorted(ref.windows.items())
                         if src == "diagnosis" and days) or "none"
     prompt = ASSESS.format(today=today.isoformat(), conditions=conditions, found=found, windows=windows,
                            complaint_days=ref.complaint_days())
-    model = chat_model(temperature=0, max_tokens=1500).with_structured_output(AIAssessment)
     message = "PATIENT_RECORD\n" + json.dumps(record, ensure_ascii=False, default=str)
     message += "\n\nCLINIC_FLAGS\n" + ("\n".join(f"- {f}" for f in flags) if flags else "- none")
-    return model.invoke([SystemMessage(content=prompt), HumanMessage(content=message)])
+    return ask_structured(prompt, message, AIAssessment)
 
 
 # Whether BP or sugar is under control is the clinic's vital flags' call, not

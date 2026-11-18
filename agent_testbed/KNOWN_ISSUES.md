@@ -9,7 +9,8 @@ The dry-run figures come from `backend/scripts/dry_run.py` on 50 real patients
 
 ## Bugs
 
-### 1. "Knee joint pain" makes a patient severe
+### 1. "Knee joint pain" makes a patient severe (fixed 2026-11-17)
+- **Fixed:** the longest alias match wins (`agent/conditions.py` → `longest_matches()`); the same fix stopped "pre diabetes" from also counting as diabetes. Tests: `tests/test_joint_hand_skin.py`.
 - **Seen:** the alias file has `knee joint pain → arthritis_knee` and `joint pain → other_unlisted` ("joint not named: doctor decides"). Text such as "Knee joint pain since 1 month" matches both, so the patient also gets `other_unlisted`, which is a refer condition, so the case is severe.
 - **Impact:** in the dry run, 2 of 50 patients were severe for this reason alone and would otherwise have had an AI draft; a third had it on top of other reasons.
 - **Where:** `agent/conditions.py` → `rule_findings()` / `match_text()`; `data/condition_aliases.csv` lines for `joint pain`, `polyarthralgia`.
@@ -44,6 +45,7 @@ The dry-run figures come from `backend/scripts/dry_run.py` on 50 real patients
 ### 7. Dizziness and tingling send many patients to a doctor
 - **Seen:** a warning complaint in the last 6 months made 13 of 50 patients severe; for 4 it was the only reason. Dizziness was the most common (10 patients), often everyday wording ("Dizziness, acidity", "Weakness dizziness"); numbness or tingling next (5).
 - **To decide (clinical):** whether dizziness and tingling alone should stop an AI draft, or only show as a concern on it. `data/warning_complaints.csv`.
+- **Decided 2026-11-05 (dizziness only; needs clinical sign-off):** dizziness stops an AI draft only for higher-risk patients: age 60+, or BP, diabetes or a heart condition. For anyone else it shows as a concern on the assessment ("Please check it has passed") and the AI may draft. Why it isn't dropped altogether: the ACSM pre-exercise screening lists dizziness as a sign that calls for medical clearance. Code: `agent/routing.py` (`DIZZINESS_STOP_AGE`, `DIZZINESS_STOP_CODES`); tests in `tests/test_safety.py`. Still open: numbness / tingling, and a shorter time window for dizziness.
 
 ### 8. Language of the patient page
 - **Seen:** the plan says English (decided 2026-10-23), but in the clinic DB 55,242 patients prefer Hindi, 1,973 Marathi and 9 English. The clinic's own advice sheets (`visit_advice_sheet`) are stored in English and Hindi.
@@ -51,7 +53,8 @@ The dry-run figures come from `backend/scripts/dry_run.py` on 50 real patients
 
 ## Alias gaps (data, needs clinical review)
 
-### 9. Wording the aliases don't cover
+### 9. Wording the aliases don't cover (added 2026-11-17)
+- **Added:** `lba`, `lumbago` (covers acute lumbago), `ht`, bare `djd` (→ doctor decides).
 - `LBA` and `acute lumbago` (low back ache): should map to `chronic_back_pain`.
 - `HT` as short for hypertension (only `htn` is covered): should map to `bp_any`.
 - `DJD` on its own, with no joint named.
@@ -62,6 +65,8 @@ The dry-run figures come from `backend/scripts/dry_run.py` on 50 real patients
 ### 10. AI drafts vary little
 - **Seen:** all 11 AI drafts in the dry run start with Walking. The 4 patients with no condition we track all got the same five exercises (Walking, Shoulder Circles, Ankle Circles, Wrist Circles, Neck Hold).
 - **Proposed fix:** look at the draft prompt and the order of `candidates()` once a doctor has reviewed some drafts (`GET /review-summary`).
+- **Seen again 2026-11-16 (6959e408, BP + BMI 31.2):** Seated Knee Straightening and Chin Tuck with no knee or neck problem; Wall Push-up (offered 5th) and Sit to Stand (20th: a mild "modify" note puts it behind every "safe" exercise) left out. Options A–D in `TESTING_CHECKLIST.md` (#33); recommended: a balanced mix in code (tracker step 5) and letting a mild "modify" keep its rank.
+- **Fixed 2026-11-16 (B + D):** every draft is a balanced plan (walking, leg strength, upper-body strength, balance, breathing); the AI chooses among each slot's best 3. Exercises can't be picked at random any more. Plans now look more alike across patients (one upper-body exercise only), which is the opposite risk: more exercises or body-part tags later.
 
 ### 11. Testbed controls at phone width
 - **Seen:** at 360px the testbed's top bar cuts off the "Doctor" button and the patient dropdown sticks out of its card. The patient plan page itself is fine.
@@ -69,8 +74,19 @@ The dry-run figures come from `backend/scripts/dry_run.py` on 50 real patients
 
 ## Housekeeping
 
-### 12. Data files not in git
-- `backend/data/*.csv` (conditions, safety grid, exercises, aliases, warning complaints) are untracked. The app can't start correctly from a fresh clone without them. Commit them.
+
+
+
+
+
+### 12. Data files not in git (resolved)
+- `backend/data/*.csv` were untracked. Committed in `97ecc77` (2026-10-28).
 
 ### 13. Old test rows in the temp DB
 - From 2026-10-21, before phase 5: 2 approved plans, 2 pending "doctor must write" drafts, 2 open cases, and the 8 chat messages above. Harmless; the 2 plans are useful for testing the patient page. Delete them before any real use.
+
+### 14. Scanned documents overwrote the doctor's typed record (fixed 2026-11-17)
+- **Seen:** in `/timeline`, each visit has the typed "(database)" complaint and diagnosis, then the colleague's OCR of scanned papers ("(Document N)"). Our parser read both as the same field, so the scan won. 0017c9d8 got "BP under control" from "HTn G6A2B1C0" (scan, 14 Jul; typed: Eczema) and "BP pulse SPo2 Sign" as a diagnosis (scan, 10 Sep; typed: LSC); 016e4c77 got "Dysmenorrhea" (scan, 1 Aug; typed: Eczema). 6 fields in 2 of the 5 dashboard patients.
+- **Fixed:** the typed value wins; a scan fills a field only when nothing was typed (marked `from_document`). `app/clinic_api.py` → `parse_timeline()`; tests in `tests/test_clinic_api.py`.
+- **Reported to the colleague (OCR):** scans are often the previous visit's prescription (the paper's follow-up date shows which visit), a form heading was read as a diagnosis, and medicine lines were read as lab results.
+

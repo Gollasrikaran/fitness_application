@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import logging
 
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.conditions import load_reference, rule_findings
-from agent.llm import chat_model
+from agent.llm import ask
 from agent.prompts import DOCTOR_CHAT, record_block
 from app.source import clinic
 from store import assessments as assessment_store
@@ -46,13 +46,21 @@ def load_context(state: dict) -> dict:
 
 # ── chat (AI): a doctor asking about one of their patients ───────
 
+def _history(messages: list) -> list[dict]:
+    """The conversation in the API's shape, starting with the doctor's message."""
+    turns = [{"role": "user" if isinstance(m, HumanMessage) else "assistant", "content": str(m.content)}
+             for m in messages if isinstance(m, (HumanMessage, AIMessage)) and str(m.content).strip()]
+    while turns and turns[0]["role"] != "user":
+        turns.pop(0)
+    return turns
+
+
 def chat(state: dict) -> dict:
     evidence = "\n".join(state["context"].get("agent_conditions", [])) or "none"
-    system = [SystemMessage(content=DOCTOR_CHAT),
-              SystemMessage(content=f"AGENT_CONDITIONS\n{evidence}\n\nPATIENT_RECORD\n{record_block(state)}")]
+    system = f"{DOCTOR_CHAT}\n\nAGENT_CONDITIONS\n{evidence}\n\nPATIENT_RECORD\n{record_block(state)}"
     try:
-        reply = chat_model().invoke([*system, *state["messages"][-HISTORY_FOR_CHAT:]])
+        reply = ask(system, _history(state["messages"][-HISTORY_FOR_CHAT:]))
     except Exception as exc:
         log.error("Chat call failed: %s", exc)
         raise AgentUnavailable("The assistant is unavailable right now. Please try again in a minute.")
-    return {"messages": [AIMessage(content=str(reply.content).strip())]}
+    return {"messages": [AIMessage(content=reply)]}

@@ -7,7 +7,7 @@ import os
 for name in ("TEMP_DATABASE_URL", "CLINIC_DATABASE_URL"):
     os.environ[name] = "postgresql://tests@127.0.0.1:1/none"
 os.environ["REFERENCE_DATABASE_URL"] = ""
-os.environ["OPENROUTER_API_KEY"] = ""
+os.environ["ANTHROPIC_API_KEY"] = ""
 
 import pytest
 from sqlalchemy import create_engine

@@ -606,6 +606,9 @@ def test_clinic_flag_concerns_are_written_in_code_with_their_dates():
     ("doctor recorded", "Hypertension", "doctor recorded", "Hypertension", True),
     ("visit 2026-09-17, diagnosis", "Cervical pain", "visit 2026-07-10, diagnosis", "Cervical pain", False),  # other visit
     ("doctor recorded", "Hypertension", "health history", "hypertension", False),  # other source
+    # 6959e408 (2026-11-18): the AI adds the item after a comma; still the same source
+    ("health history", "hypertension", "health history, hypertension", "hypertension", True),
+    ("doctor recorded", "Hypertension", "health history, hypertension", "hypertension", False),
     # bd8b445c (2026-11-16): a diagnosis inside the same day's complaint is not the same evidence
     ("visit 2026-06-18, complaint", "Domestic fall yesterday,lt hand stuck and shoulder pain",
      "visit 2026-06-18, diagnosis", "Shoulder pain", False),

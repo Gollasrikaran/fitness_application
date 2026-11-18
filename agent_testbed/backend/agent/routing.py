@@ -14,7 +14,7 @@ from agent.conditions import Finding, Reference, RuleResult, has_phrase, words
 from datetime import date
 
 from agent.conditions import is_recent
-from store.plans import READING_WINDOWS, SEVERE_THIN_BMI, UNDERWEIGHT_BMI
+from store.plans import READING_WINDOWS, SEVERE_THIN_BMI, UNDERWEIGHT_BMI, latest_readings
 
 # The clinic's own vital flags (ELEVATED and LOW don't count as "not under control").
 _BP_FLAG = re.compile(r"^BP_(SYS|DIA)_(HIGH|CRITICAL)$")
@@ -152,6 +152,52 @@ def _resolve_asthma(findings: list[Finding], context: dict, rules: RuleResult) -
                    + (f"SpO2 {spo2[0]:g}% on {spo2[1]}" if spo2 else "no SpO2 reading"))]
 
 
+# Thyroid (research/THYROID.md, 2026-11-18; provisional). "Thyroid" with the
+# type not recorded (thyroid_any) is treated as underactive, the far more
+# common one, unless the latest resting pulse is THYROID_FAST_PULSE or above
+# (the ATA's beta-blocker threshold): then possibly overactive, a doctor
+# writes the plan. Overactive wording anywhere wins over underactive.
+THYROID_FAST_PULSE = 90
+THYROID_GUESS_NAME = "Thyroid problem (type not recorded; treated as underactive)"
+_THYROID = ("thyroid_any", "hypothyroid", "hyperthyroid")
+
+
+def _latest_pulse(context: dict, ref: Reference | None, today: date | None) -> dict | None:
+    """The newest resting pulse within its window: {"value", "date"}, or None."""
+    vitals = context.get("vitals_recent") or [{**v.get("vitals", {}), "date": v["date"]} for v in context["visits"]]
+    days = (ref.windows.get(("pulse", "reading")) if ref else None) or READING_WINDOWS["pulse"]
+    return latest_readings(vitals, today or date.today(), windows={"pulse": days})["pulse"]
+
+
+def _resolve_thyroid(findings: list[Finding], context: dict, ref: Reference | None,
+                     today: date | None) -> tuple[list[tuple[str, str]], bool]:
+    """thyroid_any -> hypothyroid or hyperthyroid. Returns (code, evidence
+    line) per decision, and whether "underactive" is only a guess (no record
+    says which)."""
+    codes = {f.code for f in findings}
+    if not codes & set(_THYROID):
+        return [], False
+    if "hyperthyroid" in codes:
+        code, why = "hyperthyroid", ("overactive thyroid in the record, so the stricter reading wins"
+                                     if codes & {"thyroid_any", "hypothyroid"} else None)
+    else:
+        pulse = _latest_pulse(context, ref, today) if "thyroid_any" in codes else None
+        if pulse and pulse["value"] >= THYROID_FAST_PULSE:
+            code, why = "hyperthyroid", (f"thyroid type not recorded and resting pulse {pulse['value']:g}/min on "
+                                         f"{pulse['date']} is {THYROID_FAST_PULSE} or above: possibly overactive")
+        else:
+            code, why = "hypothyroid", None
+    for f in findings:
+        if f.code in _THYROID:
+            f.code = code
+    guessed = code == "hypothyroid" and "hypothyroid" not in codes
+    if guessed:
+        why = "thyroid type not recorded: treated as underactive (" + (
+            "no resting pulse in the recent visits)" if not _latest_pulse(context, ref, today)
+            else f"resting pulse below {THYROID_FAST_PULSE}/min)")
+    return ([(code, why)] if why else []), guessed
+
+
 # The AI sometimes names the record's raw fields in `where` ("visit 2026-10-01,
 # diagnosis_provisional"): shown as the rules word them.
 _WHERE_WORDS = {"diagnosis_provisional": "diagnosis", "diagnosis_confirmed": "diagnosis",
@@ -179,7 +225,10 @@ def _same_evidence(where: str, quote: str, other_where: str, other_quote: str) -
         return False
     if _field(where) != _field(other_where):  # a complaint never repeats a diagnosis
         return False
-    if not d1 and where.lower() != other_where.lower():
+    # Undated: the same source, ignoring the detail the AI adds after a comma
+    # ("health history" and "health history, hypertension", 6959e408 on 2026-11-18).
+    source = lambda w: w.split(",")[0].strip().lower()
+    if not d1 and source(where) != source(other_where):
         return False
     # Word by word, as the quote check reads them: "HTN,DM" and "HTN-DM" are the same words.
     a, b = words(quote), words(other_quote)
@@ -197,6 +246,8 @@ def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
     findings += [Finding("other_unlisted", "rules", u, u) for u in rules.unmapped]
     flag_notes, unknown = _resolve_markers(findings, context, ref, today or context.get("as_of"))
     flag_notes += _resolve_asthma(findings, context, rules)
+    thyroid_notes, thyroid_guessed = _resolve_thyroid(findings, context, ref, today or context.get("as_of"))
+    flag_notes += thyroid_notes
 
     # The stricter reading wins: "controlled" evidence joins the uncontrolled
     # code, so the doctor still sees it (and the flags note below says why).
@@ -218,7 +269,9 @@ def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
 
     grouped: dict[str, dict] = {}
     for f in findings:
-        name = _UNKNOWN_NAME[f.code] if f.code in unknown else ref.conditions[f.code]["name"]
+        name = (_UNKNOWN_NAME[f.code] if f.code in unknown
+                else THYROID_GUESS_NAME if f.code == "hypothyroid" and thyroid_guessed
+                else ref.conditions[f.code]["name"])
         g = grouped.setdefault(f.code, {"code": f.code, "name": name,
                                         "bucket": ref.conditions[f.code]["bucket"], "found_by": set(),
                                         "complaint_only": True, "evidence": []})

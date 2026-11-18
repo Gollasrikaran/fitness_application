@@ -7,8 +7,6 @@ long_term_condition,Stroke / CVA,neurological,
 long_term_condition,Epilepsy,neurological,
 long_term_condition,Depression,depression,
 long_term_condition,Anxiety Disorder,anxiety,
-long_term_condition,Hypothyroidism,other_unlisted,no exercise rules of ours: doctor decides
-long_term_condition,Hyperthyroidism,other_unlisted,no exercise rules of ours: doctor decides
 long_term_condition,Asthma,asthma_any,"controlled or not is decided by the rules (complaints, emergency visits, SpO2)"
 long_term_condition,COPD,copd,
 long_term_condition,Chronic Anaemia,other_unlisted,no exercise rules of ours: doctor decides
@@ -24,7 +22,6 @@ health_history,hypertension,bp_any,
 health_history,diabetes,diabetes_any,
 health_history,heart_disease,heart_condition,
 health_history,high_cholesterol,high_cholesterol,
-health_history,thyroid,other_unlisted,no exercise rules of ours: doctor decides
 health_history,asthma,asthma_any,"controlled or not is decided by the rules (complaints, emergency visits, SpO2)"
 health_history,tuberculosis,other_unlisted,serious illness: doctor decides
 text,htn,bp_any,
@@ -121,8 +118,6 @@ text,post operative,recent_surgery,
 text,postoperative,recent_surgery,
 text,depression,depression,
 text,anxiety,anxiety,
-text,hypothyroidism,other_unlisted,no exercise rules of ours: doctor decides
-text,hyperthyroidism,other_unlisted,no exercise rules of ours: doctor decides
 text,asthma,asthma_any,"controlled or not is decided by the rules (complaints, emergency visits, SpO2)"
 text,copd,copd,
 text,shoulder pain,other_unlisted,no shoulder exercises yet: doctor decides
@@ -186,3 +181,26 @@ text,herpes zoster,skin_infection,shingles: rest until healed
 text,shingles,skin_infection,
 text,cellulitis,skin_infection,
 text,abscess,skin_infection,
+long_term_condition,Hypothyroidism,hypothyroid,research/THYROID.md (2026-11-18)
+long_term_condition,Hyperthyroidism,hyperthyroid,research/THYROID.md (2026-11-18)
+health_history,thyroid,thyroid_any,type not recorded: the rules decide (research/THYROID.md)
+text,hypothyroidism,hypothyroid,research/THYROID.md (2026-11-18)
+text,hypothyroid,hypothyroid,research/THYROID.md (2026-11-18)
+text,hypo thyroid,hypothyroid,research/THYROID.md (2026-11-18)
+text,hypothyroidsm,hypothyroid,research/THYROID.md (2026-11-18)
+text,subclinical hypothyroidism,hypothyroid,research/THYROID.md (2026-11-18)
+text,hashimoto,hypothyroid,research/THYROID.md (2026-11-18)
+text,hashimotos thyroiditis,hypothyroid,research/THYROID.md (2026-11-18)
+text,hyperthyroidism,hyperthyroid,research/THYROID.md (2026-11-18)
+text,hyperthyroid,hyperthyroid,research/THYROID.md (2026-11-18)
+text,hyper thyroid,hyperthyroid,research/THYROID.md (2026-11-18)
+text,thyrotoxicosis,hyperthyroid,research/THYROID.md (2026-11-18)
+text,graves,hyperthyroid,research/THYROID.md (2026-11-18)
+text,graves disease,hyperthyroid,research/THYROID.md (2026-11-18)
+text,toxic goitre,hyperthyroid,research/THYROID.md (2026-11-18)
+text,toxic goiter,hyperthyroid,research/THYROID.md (2026-11-18)
+text,thyroid,thyroid_any,type not recorded: the rules decide (research/THYROID.md)
+text,goitre,thyroid_any,type not recorded: the rules decide (research/THYROID.md)
+text,goiter,thyroid_any,type not recorded: the rules decide (research/THYROID.md)
+text,thyroiditis,thyroid_any,type not recorded: the rules decide (research/THYROID.md)
+text,thyroid nodule,thyroid_any,type not recorded: the rules decide (research/THYROID.md)

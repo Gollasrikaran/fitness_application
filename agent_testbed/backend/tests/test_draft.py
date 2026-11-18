@@ -348,3 +348,16 @@ def test_a_rules_draft_has_a_why_under_each_exercise_too(db):
     assert p.source == "rules"
     assert all(e["why"] for e in p.exercises)
     assert "lowers resting BP" in p.exercises[0]["why"]  # our research line (no AI line)
+
+
+def test_the_draft_ai_never_sees_the_medicine_notes():
+    """6959e408 (2026-11-18): the AI justified a balance exercise with cetirizine's
+    drowsiness. Medicine notes are for the doctor only; the other concerns stay."""
+    from agent.draft import patient_for_ai
+    a = {"problem": "tinea and obesity", "body_area": "skin", "conditions": [{"code": "obesity", "name": "Overweight"}],
+         "concerns": ["Weakness was the complaint on 2026-07-20.", "Medicine: TAB CITRIZINE: may cause drowsiness",
+                      "medicine: Amlodipine: dizziness on standing", "Clinic flag: 2 missed follow-ups"]}
+    seen = patient_for_ai(a, {"age": 57, "sex": "MALE", "bmi": 31.2})
+    assert seen["concerns"] == ["Weakness was the complaint on 2026-07-20.", "Clinic flag: 2 missed follow-ups"]
+    assert "citrizine" not in str(seen).lower() and "amlodipine" not in str(seen).lower()
+    assert a["concerns"][1].startswith("Medicine:")  # the doctor's copy is untouched
