@@ -6,11 +6,10 @@ python-dotenv==1.0.1
 httpx==0.28.1
 
 
-langgraph
-langchain-openai
-
 # Agent
 langgraph==1.2.16
+langchain==1.4.6  # init_chat_model: the model is chosen in .env (agent/llm.py)
+langchain-anthropic==1.7.7  # provider packages: install the ones LLM_MODEL may name
 langchain-openai==1.7.2
 langchain-core==1.6.12
 langgraph-checkpoint-postgres==3.2.0  # conversation memory in the temp database
