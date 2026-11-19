@@ -26,7 +26,7 @@ export async function api(method, path, body) {
     } catch (e) {
       // "Failed to fetch": the server didn't answer (asleep, or no network).
       if (attempt >= retries.length) {
-        throw new Error("The server didn't answer. It may be waking up: please try again in a minute.");
+        throw new Error("The server didn't answer. Please refresh the page.");
       }
     }
     await sleep(retries[attempt]);

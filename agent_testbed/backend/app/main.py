@@ -50,14 +50,14 @@ app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
                    allow_methods=["*"], allow_headers=["*"])
 
 
-# The patient API (on Render's free plan) sleeps when idle and takes up to a
-# minute to wake. An unhandled error would be a bare 500 without CORS headers,
-# which the browser shows only as "Failed to fetch"; this answer keeps them.
+# The patient API didn't answer. An unhandled error would be a bare 500
+# without CORS headers, which the browser shows only as "Failed to fetch";
+# this answer keeps them, so the page can say what happened.
 @app.exception_handler(patient_api.PatientApiError)
 def patient_api_down(_: Request, exc: patient_api.PatientApiError):
     logging.getLogger("patient_api").warning("Answered 503: %s", exc)
     return JSONResponse(status_code=503, content={
-        "detail": "The patient service is waking up (this takes up to a minute). Please try again shortly."})
+        "detail": "The patient service didn't answer. Please refresh the page."})
 
 
 @app.get("/health")

@@ -12,6 +12,8 @@ const sexShort = (s) => ({ FEMALE: "F", MALE: "M", OTHER: "O" })[s] || "?";
 const FULL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const pretty = (s) => String(s || "").replace(/_/g, " ").toLowerCase();
 
+const PATIENTS_ERROR = "Couldn't load patients: ";
+
 function patientLabel(p) {
   const history = p.history.length ? ` · ${p.history.map(pretty).join(", ")}` : "";
   return `#${p.id.slice(0, 8)} · ${p.age ?? "?"} ${sexShort(p.sex)} · ${p.visits} visits · last ${p.last_visit}${history}`;
@@ -37,16 +39,26 @@ export default function App() {
 
   // Patient list: the chosen doctor's patients, or everyone (patient mode, or
   // a doctor-mode user picking the patient first).
+  // Only the latest request counts: an older one finishing late (or failing)
+  // never overwrites it, and a successful load clears an earlier failure.
   useEffect(() => {
+    let live = true;
     const t = setTimeout(() => {
       const params = new URLSearchParams({ limit: "200" });
       if (mode === "doctor" && doctorId) params.set("doctor_id", doctorId);
       if (search.trim()) params.set("search", search.trim());
       api("GET", `/patients?${params}`)
-        .then(setPatients)
-        .catch((e) => setError(`Couldn't load patients: ${e.message}`));
+        .then((list) => {
+          if (!live) return;
+          setPatients(list);
+          setError((current) => (current.startsWith(PATIENTS_ERROR) ? "" : current));
+        })
+        .catch((e) => live && setError(`${PATIENTS_ERROR}${e.message}`));
     }, 300);
-    return () => clearTimeout(t);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
   }, [mode, doctorId, search]);
 
   // A full patient id typed in: open that patient straight away.
