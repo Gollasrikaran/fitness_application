@@ -9,8 +9,9 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from agent.draft import generate_plan
@@ -47,6 +48,16 @@ app = FastAPI(title="Agent testbed", version="0.1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
                    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+", allow_credentials=False,
                    allow_methods=["*"], allow_headers=["*"])
+
+
+# The patient API (on Render's free plan) sleeps when idle and takes up to a
+# minute to wake. An unhandled error would be a bare 500 without CORS headers,
+# which the browser shows only as "Failed to fetch"; this answer keeps them.
+@app.exception_handler(patient_api.PatientApiError)
+def patient_api_down(_: Request, exc: patient_api.PatientApiError):
+    logging.getLogger("patient_api").warning("Answered 503: %s", exc)
+    return JSONResponse(status_code=503, content={
+        "detail": "The patient service is waking up (this takes up to a minute). Please try again shortly."})
 
 
 @app.get("/health")
