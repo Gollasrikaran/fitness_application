@@ -293,7 +293,12 @@ def _visits(summary: dict, timeline: str, names: dict[str, str],
         entries = [{"date": v["visit_date"], "visit_id": v["visit_id"]} for v in summary.get("visits") or []]
     # Newest first, whatever order the timeline lists them in (some list the
     # oldest first); visits on the same date keep the timeline's order.
-    entries = sorted(entries, key=lambda e: e["date"], reverse=True)[:limit]
+    # `limit` counts dates, not records (fix 10, 2026-11-20): the clinic often
+    # has two records a day, and 10 records were only 6 dates for 6959e408.
+    entries = sorted(entries, key=lambda e: e["date"], reverse=True)
+    if limit is not None:
+        dates = sorted({e["date"] for e in entries}, reverse=True)[:limit]
+        entries = [e for e in entries if e["date"] in dates]
     for e in entries:  # lab results count as readings, as the clinic DB's vitals do
         readings = lab_readings(e.get("labs") or [])
         if readings:
@@ -318,12 +323,48 @@ def _visits(summary: dict, timeline: str, names: dict[str, str],
     return entries, by_visit, visits
 
 
+_JOINED = ("complaint", "diagnosis_provisional", "diagnosis_confirmed", "patient_instructions")
+
+
+def merge_same_day(visits: list[dict]) -> list[dict]:
+    """One visit per date (fix 10, 2026-11-20), newest first: the records of
+    one day joined, e.g. a BP record and a skin record. Texts are joined with
+    "; " (each once), doctors with " / ", vitals combined (the first record's
+    reading wins), medicines and lab results listed once."""
+    merged: dict[str, dict] = {}
+    for v in visits:
+        m = merged.get(v["date"])
+        if m is None:
+            merged[v["date"]] = dict(v)
+            continue
+        for key in _JOINED:
+            parts = [p.strip() for p in (m.get(key), v.get(key)) if p and str(p).strip()]
+            if parts:
+                m[key] = "; ".join(dict.fromkeys(parts))
+        doctors = [d for d in (m.get("doctor"), v.get("doctor")) if d]
+        if doctors:
+            m["doctor"] = " / ".join(dict.fromkeys(" / ".join(doctors).split(" / ")))
+        if v.get("vitals"):
+            m["vitals"] = {**v["vitals"], **m.get("vitals", {})}
+        for key, ident in (("medicines", "name"), ("labs", "name")):
+            seen = {x.get(ident) for x in m.get(key) or []}
+            extra = [x for x in v.get(key) or [] if x.get(ident) not in seen]
+            if extra:
+                m[key] = [*(m.get(key) or []), *extra]
+        if v.get("emergency"):
+            m["emergency"] = True
+        if v.get("referral") and not m.get("referral"):
+            m["referral"] = v["referral"]
+    return list(merged.values())
+
+
 def build_context(summary: dict, timeline: str, doctor_names: dict[str, str] | None = None,
                   today: date | None = None) -> dict:
     """The patient record in app/clinic.py's patient_context() shape."""
     names = doctor_names or {}
     meta = {v["visit_id"]: v for v in summary.get("visits") or []}
     entries, by_visit, visits = _visits(summary, timeline, names, RECENT_VISITS)
+    visits = merge_same_day(visits)  # what the AI and the doctor chat read: one visit per date
 
     # Vitals: every visit /summary has them for, newest first.
     vitals_recent = sorted(by_visit.values(), key=lambda v: str(v["date"]), reverse=True)
@@ -331,7 +372,8 @@ def build_context(summary: dict, timeline: str, doctor_names: dict[str, str] | N
     height = next((v["height_cm"] for v in vitals_recent if v.get("height_cm")), None)
     bmi = round(weight[1] / (height / 100) ** 2, 1) if weight[1] and height and 100 <= height <= 230 else None
 
-    recent_ids = {e.get("visit_id") for e in entries[:FLAG_VISITS]}
+    flag_dates = sorted({e["date"] for e in entries}, reverse=True)[:FLAG_VISITS]  # the latest 5 dates
+    recent_ids = {e.get("visit_id") for e in entries if e["date"] in flag_dates}
     flags = [{"date": f.get("date"), "metric": f.get("metric"), "code": f.get("code"),
               "severity": f.get("severity"), "value": f.get("value")}
              for f in summary.get("vital_flags") or [] if f.get("visit_id") in recent_ids]

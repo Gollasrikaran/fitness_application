@@ -1,5 +1,6 @@
 """The patient's plan page (store.plans.patient_plan): only what a doctor
 approved, with each exercise's details in plain words."""
+import pytest
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -60,9 +61,9 @@ def test_a_plan_approved_when_walking_was_in_km_still_says_km(db):
 def test_patient_sees_only_the_plan(db):
     plan = approved(db, "p1", [item("calf_stretch", 2, 10, "Gently")])
     out = plans.patient_plan(db, plan, "Dr Rao")
-    assert set(out) == {"doctor_name", "given_on", "instructions", "exercises"}
+    assert set(out) == {"doctor_name", "given_on", "instructions", "exercises", "minutes_per_week", "review_on"}
     assert out["doctor_name"] == "Dr Rao" and out["instructions"] == "Once a day."
-    assert set(out["exercises"][0]) == {"name", "dose", "rest_seconds", "steps", "notes"}
+    assert set(out["exercises"][0]) == {"name", "dose", "how_often", "effort", "rest_seconds", "steps", "notes"}
 
 
 def test_exercise_details_come_from_the_exercise_table(db):
@@ -104,3 +105,53 @@ def test_an_exercise_since_removed_from_the_table_still_shows(db):
 def test_time_exercises_in_plain_words(db):
     out = plans.patient_plan(db, approved(db, "p1", [item("slow_breathing", 1, 5), item("march_in_place", 2, 10)]), None)
     assert [e["dose"] for e in out["exercises"]] == ["5 minutes", "2 sets × 10 minutes"]
+
+
+# ── The weekly plan (fix 14, 2026-11-20) ────────────────────────────────────
+
+def test_every_exercise_has_days_and_effort(db):
+    for ex in db.scalars(select(Exercise)):
+        assert 1 <= ex.days_per_week <= 7 and ex.effort, ex.activity_type
+    assert db.get(Exercise, "walk").days_per_week == 5 and "talk but not sing" in db.get(Exercise, "walk").effort
+    assert db.get(Exercise, "sit_to_stand").days_per_week == 3 and db.get(Exercise, "slow_breathing").days_per_week == 7
+
+
+def test_the_patient_sees_how_often_how_hard_and_the_review_date(db):
+    plan = approved(db, "p1", [{"activity_type": "walk", "sets": 1, "amount": 10},
+                               {"activity_type": "sit_to_stand", "sets": 2, "amount": 5},
+                               {"activity_type": "slow_breathing", "sets": 1, "amount": 5, "days_per_week": 7}])
+    out = plans.patient_plan(db, plan, "Rao")
+    walk, sts, breath = out["exercises"]
+    assert walk["how_often"] == "5 days a week" and "talk but not sing" in walk["effort"]
+    assert sts["how_often"] == "3 days a week" and breath["how_often"] == "every day"
+    assert out["minutes_per_week"] == 50  # 10 minutes x 5 days
+    assert out["review_on"] == (plan.created_at.date() + timedelta(days=28)).isoformat()
+
+
+def test_the_doctor_can_set_the_days_but_only_1_to_7(db):
+    out = plans.doctor_exercises(db, [{"activity_type": "walk", "sets": 1, "amount": 30, "days_per_week": 6}])
+    assert out[0]["days_per_week"] == 6 and plans.minutes_per_week(out) == 180
+    with pytest.raises(ValueError):
+        plans.doctor_exercises(db, [{"activity_type": "walk", "sets": 1, "amount": 30, "days_per_week": 8}])
+
+
+def test_drafts_carry_the_days_and_a_bad_day_count_breaks_the_rules(db):
+    allowed, _ = plans.candidates(db, ["none"], 45, 24)
+    entry = plans.plan_entry(next(e for e in allowed if e["activity_type"] == "walk"))
+    assert entry["days_per_week"] == 5
+    assert plans.violations(db, [{**entry, "days_per_week": 9}], ["none"])
+
+
+def test_the_draft_says_when_walking_starts_below_the_research_dose(db):
+    from agent.draft import build_draft
+    from tests.test_draft import PATIENT, ai_picking, assessment
+    p = build_draft(db, "p9", assessment(["bp_controlled"]), PATIENT, ask_ai=ai_picking("walk"))
+    assert "Walking starts at 50 minutes a week; the research benefits are seen at about 150." in p.reason
+    assert all(x["days_per_week"] for x in p.exercises)
+
+
+def test_the_walking_research_lines_name_their_weekly_dose():
+    from store.seed import _rows
+    walk = [r["benefit"] for r in _rows("exercise_benefits.csv")
+            if r["activity_type"] == "walk" and r["condition_code"] in ("bp_controlled", "diabetes_controlled")]
+    assert walk and all("150 minutes a week" in b for b in walk)

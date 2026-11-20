@@ -209,3 +209,28 @@ def test_hand_pain_plan(db):
 def test_hand_plan_passes_the_rules(db):
     exercises, _ = plans.starter_exercises(db, ["hand_pain"], 46, 22, readings=NORMAL)
     assert plans.violations(db, exercises, ["hand_pain"], NORMAL) == []
+
+
+# ── No floor exercises with a fungal skin infection (fix 13, 2026-11-20) ────
+# 069d26fe: tinea on the feet and buttocks, and the draft had Glute Bridge.
+
+FLOOR = {"glute_bridge", "dead_bug", "hamstring_stretch", "quad_stretch"}
+
+
+def test_fungal_infection_avoids_every_floor_exercise(db):
+    v = verdicts(db, "skin_fungal")
+    assert {k for k, r in v.items() if r.verdict == "avoid"} == FLOOR
+    assert all("mat" in v[k].note for k in FLOOR)
+    floor = {e.activity_type for e in db.scalars(select(Exercise).where(Exercise.position == "floor"))}
+    assert floor == FLOOR  # a new floor exercise needs its own fungal row
+
+
+def test_dermatitis_keeps_the_floor_exercises(db):
+    v = verdicts(db, "skin_dermatitis")
+    assert all(v[k].verdict == "safe" for k in FLOOR)
+
+
+def test_a_fungal_patients_leg_slot_has_no_floor_exercise(db):
+    s, allowed = slots(db, ["asthma_controlled", "skin_fungal"])
+    assert not {e["activity_type"] for e in allowed} & FLOOR
+    assert s["leg strength"] and not set(s["leg strength"]) & FLOOR

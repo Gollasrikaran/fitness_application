@@ -14,8 +14,8 @@ from agent.conditions import Finding, Reference, RuleResult, has_phrase, words
 from datetime import date
 
 from agent.conditions import is_recent
-from store.plans import (ASSUMED_BP, READING_WINDOWS, SEVERE_THIN_BMI, UNDERWEIGHT_BMI, bp_of, latest_bp, latest_readings,
-                         reading_text)
+from store.plans import (ASSUMED_BP, HIGH_BMI, READING_WINDOWS, SEVERE_THIN_BMI, UNDERWEIGHT_BMI, bp_of, latest_bp,
+                         latest_readings, reading_text)
 
 
 # The clinic's own vital flags (ELEVATED and LOW don't count as "not under control").
@@ -49,6 +49,61 @@ def _low_bp_concerns(context: dict) -> list[str]:
             if text and any(has_phrase(words(text), p) for p in _LOW_BP_WORDS):
                 out.append(f"Low BP in the {field} on {v['date']}: \"{text.strip()}\". Check for dizziness on standing.")
     return out
+
+
+# Heights that differ between visits (fix 08, 2026-11-20): BMI uses the
+# latest height, so a typing error changes which BMI rules apply (6959e408:
+# 158 cm now, 165 cm in May and June: BMI 31.2 or 28.7). The doctor sees both.
+HEIGHT_DIFFERS_CM = 2
+
+
+def _height_concerns(context: dict) -> list[str]:
+    body = context.get("body") or {}
+    vitals = context.get("vitals_recent") or [{**v.get("vitals", {}), "date": v["date"]} for v in context["visits"]]
+    latest_on: dict[float, str] = {}  # height -> the newest date it was recorded
+    for v in vitals:
+        try:
+            h = float(v.get("height_cm"))
+        except (TypeError, ValueError):
+            continue
+        if 100 <= h <= 220 and v.get("date"):
+            day = str(v["date"])[:10]
+            latest_on[h] = max(latest_on.get(h, day), day)
+    if len(latest_on) < 2 or max(latest_on) - min(latest_on) <= HEIGHT_DIFFERS_CM:
+        return []
+    current = body.get("height_cm")
+    # The height the BMI uses first, then the others, newest first.
+    heights = sorted(latest_on, key=lambda h: (h != current, latest_on[h] if h == current else ""), reverse=False)
+    heights = heights[:1] + sorted(heights[1:], key=lambda h: latest_on[h], reverse=True)
+    text =", ".join(f"{h:g} cm ({'latest, ' if h == current else ''}{latest_on[h]})" for h in heights)
+    weight = body.get("weight_kg")
+    if not weight:
+        return [f"Height recorded differently between visits: {text}. Please check the height."]
+    bmis = [round(float(weight) / (h / 100) ** 2, 1) for h in heights]
+    shown = (" or ".join(f"{b:g}" for b in bmis) if len(bmis) == 2
+             else f"{min(bmis):g} to {max(bmis):g} (latest {bmis[0]:g})")
+    line = f"Height recorded differently between visits: {text}. With {float(weight):g} kg that is BMI {shown}."
+    crossed = [f"{t:g}" for t in (HIGH_BMI, UNDERWEIGHT_BMI) if min(bmis) < t <= max(bmis)]
+    if crossed:
+        line += f" The BMI {' and '.join(crossed)} rules depend on which is right (the latest height is used)."
+    return [line + " Please check the height."]
+
+
+# A record of one visit for a short illness (fix 12, 2026-11-20): 30ca6dbf's
+# only visit was for a cough and cold. The illness may still be there.
+_SHORT_ILLNESS = [words(p) for p in ("cold", "cough", "fever", "throat", "sore throat", "flu", "viral", "vomiting",
+                                     "loose motion", "loose motions", "diarrhoea", "diarrhea")]
+
+
+def _short_illness_concerns(context: dict) -> list[str]:
+    first, last, dates = _record_span(context)
+    if dates != 1:
+        return []
+    visit = next((v for v in context.get("visits_all") or context.get("visits") or [] if v.get("complaint")), None)
+    if not visit or not any(has_phrase(words(visit["complaint"]), p) for p in _SHORT_ILLNESS):
+        return []
+    return [f"The only visit ({last}) was for a short illness: \"{visit['complaint'].strip()}\". "
+            "Please check it has passed."]
 
 
 def _underweight(context: dict) -> tuple[list[str], list[str]]:
@@ -188,7 +243,7 @@ def _latest_spo2(visits: list[dict], today: date | None = None, days: int | None
 
 def _record_span(context: dict) -> tuple[str | None, str | None, int]:
     """(first visit date, last visit date, number of visit dates) of the record."""
-    visits = context.get("visits_all") or context["visits"]
+    visits = context.get("visits_all") or context.get("visits") or []
     dates = sorted({str(v["date"])[:10] for v in visits if v.get("date")})
     first = str((context.get("care") or {}).get("first_visit") or "")[:10] or (dates[0] if dates else None)
     return (min(first, dates[0]) if first and dates else first), (dates[-1] if dates else None), len(dates)
@@ -391,14 +446,16 @@ def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
     concerns = []
     for w in rules.warnings:
         line = f"{w['label']} in the complaint on {w['date']}: \"{w['complaint']}\""
-        if w["label"] == DIZZINESS and not dizziness_stops:
+        if w.get("stops") is False:  # e.g. leg pain (fix 10): for the doctor to ask about, not a stop
+            concerns.append(f"{line}. Not a stop on its own: please ask about it before approving.")
+        elif w["label"] == DIZZINESS and not dizziness_stops:
             concerns.append(f"{line}. Not a stop on its own: under 60, with no BP, diabetes or heart condition. "
                             "Please check it has passed.")
         else:
             reasons.append(line)
     thin_reasons, thin_concerns = _underweight(context)
     reasons += thin_reasons
-    concerns += thin_concerns + _low_bp_concerns(context)
+    concerns += thin_concerns + _height_concerns(context) + _short_illness_concerns(context) + _low_bp_concerns(context)
     # Left out as older than their time window (data/time_windows.csv): the doctor still sees them.
     concerns += [f"Not counted, too old: {line}" for line in rules.expired]
     if ai is None and not conditions:

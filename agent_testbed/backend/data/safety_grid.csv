@@ -729,9 +729,9 @@ skin_fungal,walk,safe,"Gentle, low-load movement with no specific concern for th
 skin_dermatitis,walk,safe,"Gentle, low-load movement with no specific concern for this condition.",1,product-team (not clinically reviewed),2026-11-17
 skin_fungal,running,modify,Heavy sweating keeps the skin damp and slows healing: walk instead while the infection is active; shower and dry soon after.,5,product-team (not clinically reviewed),2026-11-17
 skin_dermatitis,running,modify,"Heavy sweating can bring on itch. During a flare, walk instead; shower and moisturise soon after.",5,product-team (not clinically reviewed),2026-11-17
-skin_fungal,glute_bridge,safe,"Gentle, low-load movement with no specific concern for this condition.",2,product-team (not clinically reviewed),2026-11-17
+skin_fungal,glute_bridge,avoid,"Lying or sitting on the floor puts infected skin on a mat that is often shared or damp, and the friction and sweat slow healing: a chair or standing exercise instead while the infection lasts.",2,product-team (not clinically reviewed),2026-11-20
 skin_dermatitis,glute_bridge,safe,"Gentle, low-load movement with no specific concern for this condition.",2,product-team (not clinically reviewed),2026-11-17
-skin_fungal,dead_bug,safe,"Gentle, low-load movement with no specific concern for this condition.",3,product-team (not clinically reviewed),2026-11-17
+skin_fungal,dead_bug,avoid,"Lying or sitting on the floor puts infected skin on a mat that is often shared or damp, and the friction and sweat slow healing: a chair or standing exercise instead while the infection lasts.",3,product-team (not clinically reviewed),2026-11-20
 skin_dermatitis,dead_bug,safe,"Gentle, low-load movement with no specific concern for this condition.",3,product-team (not clinically reviewed),2026-11-17
 skin_fungal,ankle_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",6,product-team (not clinically reviewed),2026-11-17
 skin_dermatitis,ankle_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",6,product-team (not clinically reviewed),2026-11-17
@@ -741,9 +741,9 @@ skin_fungal,shoulder_circles,safe,"Gentle, low-load movement with no specific co
 skin_dermatitis,shoulder_circles,safe,"Gentle, low-load movement with no specific concern for this condition.",4,product-team (not clinically reviewed),2026-11-17
 skin_fungal,neck_isometric,safe,"Gentle, low-load movement with no specific concern for this condition.",11,product-team (not clinically reviewed),2026-11-17
 skin_dermatitis,neck_isometric,safe,"Gentle, low-load movement with no specific concern for this condition.",11,product-team (not clinically reviewed),2026-11-17
-skin_fungal,hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",9,product-team (not clinically reviewed),2026-11-17
+skin_fungal,hamstring_stretch,avoid,"Lying or sitting on the floor puts infected skin on a mat that is often shared or damp, and the friction and sweat slow healing: a chair or standing exercise instead while the infection lasts.",9,product-team (not clinically reviewed),2026-11-20
 skin_dermatitis,hamstring_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",9,product-team (not clinically reviewed),2026-11-17
-skin_fungal,quad_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",10,product-team (not clinically reviewed),2026-11-17
+skin_fungal,quad_stretch,avoid,"Lying or sitting on the floor puts infected skin on a mat that is often shared or damp, and the friction and sweat slow healing: a chair or standing exercise instead while the infection lasts.",10,product-team (not clinically reviewed),2026-11-20
 skin_dermatitis,quad_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",10,product-team (not clinically reviewed),2026-11-17
 skin_fungal,calf_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-11-17
 skin_dermatitis,calf_stretch,safe,"Gentle, low-load movement with no specific concern for this condition.",8,product-team (not clinically reviewed),2026-11-17

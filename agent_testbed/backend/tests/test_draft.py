@@ -162,7 +162,7 @@ def test_walking_leads_an_ai_draft_even_when_the_ai_leaves_it_out(db):
                     ask_ai=ai_picking("slow_breathing", "march_in_place", "sit_to_stand"))
     kinds = [e["activity_type"] for e in p.exercises]
     assert p.source == "ai" and kinds[0] == "walk" and "march_in_place" not in kinds
-    assert p.exercises[0]["why"].startswith("BP under control: walking-type exercise lowers resting BP")
+    assert p.exercises[0]["why"].startswith("BP: walking-type exercise at about 150 minutes a week lowers resting BP")
 
 
 def test_each_exercise_carries_its_own_why_not_the_reason(db):
@@ -269,13 +269,33 @@ def test_breathlessness_in_everyday_words_is_a_warning(db):
 
 # ── The "why" under each exercise (2026-11-17) ──────────────────────────────
 
-def test_without_an_ai_line_and_evidence_the_rules_line_names_the_part_of_the_plan(db):
+def test_without_evidence_the_why_says_what_the_part_of_the_plan_trains(db):
+    """Fix 09, option A (2026-11-20): with no research line, never the AI's
+    line (03cf014c: "helps you stay calm" had no source)."""
     slots = slot_options(db, ["pcos"])  # no research lines for PCOD
     p = build_draft(db, "p1", assessment(["pcos"]), PATIENT, ask_ai=ai_picking(slots["breathing"][0]))
     assert p.source == "ai"
-    assert p.exercises[-1]["why"] == "helps"  # the AI's own line
-    assert p.exercises[1]["why"] == "Leg strength: the best-ranked option for this part of the plan (chosen by the safety rules)."
+    assert p.exercises[-1]["why"] == ("Breathing: slow, controlled breathing to end the session. "
+                                      "No research line for this patient's conditions; chosen by the safety rules.")
+    assert p.exercises[1]["why"].startswith("Leg strength: works the leg muscles used to stand up and walk.")
     assert p.exercises[0]["why"].startswith("Main exercise of the plan")
+    assert all(x["why"] != "helps" for x in p.exercises)  # the AI's line is never used without evidence
+
+
+def test_the_older_people_balance_line_only_from_60(db):
+    """1123000d (48): "balance training is advised for people with diabetes" dropped "older"."""
+    def balance_benefits(age):
+        allowed, _ = plans.candidates(db, ["diabetes_controlled"], age, 24)
+        return next(e for e in allowed if e["activity_type"] == "single_leg_stand")["benefits"]
+    assert balance_benefits(48) == []
+    assert any("older people" in b for b in balance_benefits(66))
+
+
+def test_the_research_lines_no_longer_say_after_meals_or_4_7():
+    from store.seed import _rows
+    lines = [r["benefit"] for r in _rows("exercise_benefits.csv")]
+    assert not any("main meal" in b or "4-7" in b for b in lines)
+    assert any("about 4-5 mmHg (more when BP is already high)" in b for b in lines)
 
 
 def ai_with_whys(whys):
@@ -290,12 +310,12 @@ def test_the_ai_line_may_quote_only_numbers_from_the_evidence_or_the_patient(db)
     only source of health facts. A number it made up drops its line."""
     p = build_draft(db, "p1", assessment(["bp_controlled"]), {"age": 57, "sex": "M", "bmi": 31.2},
                     ask_ai=ai_with_whys({
-                        "walk": "Walking lowers resting BP by about 4-7 mmHg, which suits his BP.",  # from the evidence
+                        "walk": "Walking lowers resting BP by about 4-5 mmHg, which suits his BP.",  # from the evidence
                         "sit_to_stand": "Leg strength lowers BP by 12 mmHg.",  # invented: dropped
                         "slow_breathing": "Calming breathing for a 57-year-old with BMI 31.2."}))  # his own numbers
     why = {e["activity_type"]: e["why"] for e in p.exercises}
-    assert why["walk"] == "Walking lowers resting BP by about 4-7 mmHg, which suits his BP."
-    assert why["sit_to_stand"].startswith("BP under control: strength exercise with movement")  # our line instead
+    assert why["walk"] == "Walking lowers resting BP by about 4-5 mmHg, which suits his BP."
+    assert why["sit_to_stand"].startswith("BP: strength exercise with movement")  # our line instead
     assert why["slow_breathing"] == "Calming breathing for a 57-year-old with BMI 31.2."
 
 
@@ -371,3 +391,10 @@ def test_the_draft_ai_never_sees_the_medicine_notes():
     assert seen["concerns"] == ["Weakness was the complaint on 2026-07-20.", "Clinic flag: 2 missed follow-ups"]
     assert "citrizine" not in str(seen).lower() and "amlodipine" not in str(seen).lower()
     assert a["concerns"][1].startswith("Medicine:")  # the doctor's copy is untouched
+
+
+def test_research_lines_name_the_condition_not_its_control(db):
+    """Fix 09: P1's BP is "above target", so "BP under control: …" was wrong."""
+    allowed, _ = plans.candidates(db, ["bp_controlled", "diabetes_controlled"], 50, 24)
+    walk = next(e for e in allowed if e["activity_type"] == "walk")
+    assert [b.split(":")[0] for b in walk["benefits"]] == ["BP", "Diabetes"]

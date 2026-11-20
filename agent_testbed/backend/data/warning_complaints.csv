@@ -1,42 +1,55 @@
-phrase,label
-chest pain,Chest pain
-chest discomfort,Chest pain
-chest heaviness,Chest pain
-breathlessness,Breathlessness
-breathless,Breathlessness
-shortness of breath,Breathlessness
-difficulty in breathing,Breathlessness
-breathing difficulty,Breathlessness
-difficulty breathing,Breathlessness
-breathing problem,Breathlessness
-breathing problems,Breathlessness
-problem in breathing,Breathlessness
-breathing trouble,Breathlessness
-trouble breathing,Breathlessness
-breathing issue,Breathlessness
-breathing issues,Breathlessness
-short of breath,Breathlessness
-shortness of breathing,Breathlessness
-short of breathing,Breathlessness
-sob,Breathlessness
-dyspnea,Breathlessness
-dyspnoea,Breathlessness
-dizziness,Dizziness
-giddiness,Dizziness
-vertigo,Dizziness
-fainting,Fainting
-syncope,Fainting
-unconscious,Fainting
-palpitation,Palpitations
-palpitations,Palpitations
-numbness,Numbness or tingling
-tingling,Numbness or tingling
-seizure,Seizure
-fits,Seizure
-wheeze,Wheeze
-wheezing,Wheeze
-leg weakness,Leg weakness or bladder change
-weakness in legs,Leg weakness or bladder change
-weakness in leg,Leg weakness or bladder change
-foot drop,Leg weakness or bladder change
-loss of bladder control,Leg weakness or bladder change
+phrase,label,stops
+chest pain,Chest pain,yes
+chest discomfort,Chest pain,yes
+chest heaviness,Chest pain,yes
+breathlessness,Breathlessness,yes
+breathless,Breathlessness,yes
+shortness of breath,Breathlessness,yes
+difficulty in breathing,Breathlessness,yes
+breathing difficulty,Breathlessness,yes
+difficulty breathing,Breathlessness,yes
+breathing problem,Breathlessness,yes
+breathing problems,Breathlessness,yes
+problem in breathing,Breathlessness,yes
+breathing trouble,Breathlessness,yes
+trouble breathing,Breathlessness,yes
+breathing issue,Breathlessness,yes
+breathing issues,Breathlessness,yes
+short of breath,Breathlessness,yes
+shortness of breathing,Breathlessness,yes
+short of breathing,Breathlessness,yes
+sob,Breathlessness,yes
+dyspnea,Breathlessness,yes
+dyspnoea,Breathlessness,yes
+dizziness,Dizziness,yes
+giddiness,Dizziness,yes
+vertigo,Dizziness,yes
+fainting,Fainting,yes
+syncope,Fainting,yes
+unconscious,Fainting,yes
+palpitation,Palpitations,yes
+palpitations,Palpitations,yes
+numbness,Numbness or tingling,yes
+tingling,Numbness or tingling,yes
+seizure,Seizure,yes
+fits,Seizure,yes
+wheeze,Wheeze,yes
+wheezing,Wheeze,yes
+leg weakness,Leg weakness or bladder change,yes
+weakness in legs,Leg weakness or bladder change,yes
+weakness in leg,Leg weakness or bladder change,yes
+foot drop,Leg weakness or bladder change,yes
+loss of bladder control,Leg weakness or bladder change,yes
+leg pain,Leg or muscle pain (ask: pain on walking?),no
+legs pain,Leg or muscle pain (ask: pain on walking?),no
+pain in leg,Leg or muscle pain (ask: pain on walking?),no
+pain in legs,Leg or muscle pain (ask: pain on walking?),no
+pain in both legs,Leg or muscle pain (ask: pain on walking?),no
+calf pain,Leg or muscle pain (ask: pain on walking?),no
+pain in calf,Leg or muscle pain (ask: pain on walking?),no
+muscle pain,Leg or muscle pain (ask: pain on walking?),no
+muscles pain,Leg or muscle pain (ask: pain on walking?),no
+leg cramps,Leg or muscle pain (ask: pain on walking?),no
+cramps in legs,Leg or muscle pain (ask: pain on walking?),no
+pain while walking,Leg or muscle pain (ask: pain on walking?),no
+pain on walking,Leg or muscle pain (ask: pain on walking?),no

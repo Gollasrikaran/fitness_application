@@ -14,8 +14,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from store.db import SCHEMA, Base
-from store.models import Condition, Exercise, ReadingRule, SafetyRule
-from store.seed import _from_csv, reading_rules
+from store.models import AskQuestion, Condition, Exercise, ReadingRule, SafetyRule
+from store.seed import _from_csv, _rows, reading_rules
 
 
 @pytest.fixture
@@ -29,5 +29,6 @@ def db():
         s.flush()
         s.add_all(SafetyRule(**r) for r in rules.values())
         s.add_all(ReadingRule(**r) for r in reading_rules())
+        s.add_all(AskQuestion(who=r["who"], question=r["question"]) for r in _rows("ask_before_approving.csv"))
         s.flush()
         yield s

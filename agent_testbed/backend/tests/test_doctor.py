@@ -33,7 +33,7 @@ def test_doctor_can_approve_an_avoid_exercise_and_a_big_dose(db):
 def test_doctor_edit_keeps_names_units_and_notes(db):
     out = plans.doctor_exercises(db, [item("walk", 1, 20, "  morning only ")])
     assert out == [{"activity_type": "walk", "name": "Walking", "unit": "min", "sets": 1, "amount": 20,
-                    "notes": "morning only"}]
+                    "notes": "morning only", "days_per_week": 5}]  # days: the exercise's default (fix 14)
 
 
 @pytest.mark.parametrize("bad", [
@@ -114,3 +114,19 @@ def test_review_summary_counts_what_doctors_changed(db):
     assert out["rejections"] == [{"source": "rules", "note": "Patient can't walk far"}]
     assert plans.review_summary(db, "d2")["by_source"] == {"rules": {"reviewed": 1, "approved_as_drafted": 0,
                                                                      "approved_with_edits": 0, "rejected": 1}}
+
+
+def test_the_api_passes_the_doctors_days_a_week():
+    """Fix 14: the approve request's exercise model carries days_per_week (1-7)."""
+    import pytest as _p
+    from pydantic import ValidationError
+    from app.main import ExerciseIn
+    assert ExerciseIn(activity_type="walk", sets=1, amount=30, days_per_week=6).model_dump()["days_per_week"] == 6
+    assert ExerciseIn(activity_type="walk", sets=1, amount=30).model_dump()["days_per_week"] is None
+    with _p.raises(ValidationError):
+        ExerciseIn(activity_type="walk", sets=1, amount=30, days_per_week=8)
+
+
+def test_no_days_from_the_api_means_the_default(db):
+    out = plans.doctor_exercises(db, [{"activity_type": "sit_to_stand", "sets": 2, "amount": 5, "days_per_week": None}])
+    assert out[0]["days_per_week"] == 3

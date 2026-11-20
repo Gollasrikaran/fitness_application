@@ -82,7 +82,9 @@ export default function AgentPanel({ patientId, doctor, doctors, version, onChan
             <p className="small pre">{plan.instructions}</p>
             {plan.exercises.map((e, i) => (
               <div key={i} className="small row-item">
-                • {e.name}: {e.sets} × {e.amount} {e.unit} {e.notes && <span className="muted">({e.notes})</span>}
+                • {e.name}: {e.sets} × {e.amount} {e.unit}
+                {e.days_per_week ? `, ${e.days_per_week >= 7 ? "every day" : `${e.days_per_week} days a week`}` : ""}{" "}
+                {e.notes && <span className="muted">({e.notes})</span>}
               </div>
             ))}
           </>
@@ -200,7 +202,7 @@ function ReviewCard({ p, patientId, assessment, doctor, onChanged }) {
     if (!e) return;
     const notes = e.verdict === "modify" ? e.notes : "";
     setExercises((xs) => [...xs, { activity_type: kind, name: e.name, unit: e.unit, sets: e.default_sets,
-                                   amount: e.default_amount, notes }]);
+                                   amount: e.default_amount, notes, days_per_week: e.days_per_week }]);
   }
 
   async function act(path, body) {
@@ -225,6 +227,17 @@ function ReviewCard({ p, patientId, assessment, doctor, onChanged }) {
         </span>
       </div>
       {assessment && <AssessmentView a={assessment} />}
+      {p.ask_first?.length > 0 && (
+        // Fix 11 (2026-11-20): the same questions for every patient of a kind, a reminder (nothing to tick).
+        <div className="small">
+          <strong>Ask before approving</strong>
+          <ul>
+            {p.ask_first.map((q, i) => (
+              <li key={i}>{q}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {p.source === "doctor" ? (
         <p className="small">No AI draft for this patient. Add exercises below and write the instructions.</p>
       ) : (
@@ -268,12 +281,18 @@ function ReviewCard({ p, patientId, assessment, doctor, onChanged }) {
                 {e.unit}
                 {verdictOf(e.activity_type)?.per_side && " each side"}
               </span>
+              <input type="number" min="1" max="7" step="1" value={e.days_per_week ?? verdictOf(e.activity_type)?.days_per_week ?? 3}
+                     onChange={(ev) => update(i, "days_per_week", parseInt(ev.target.value, 10) || 0)} />
+              <span>days a week</span>
               {verdictOf(e.activity_type) && (
                 <span className="muted">
                   usual max {verdictOf(e.activity_type).max_sets} × {verdictOf(e.activity_type).max_amount}
                 </span>
               )}
             </div>
+            {verdictOf(e.activity_type)?.effort && (
+              <div className="small muted">How hard: {verdictOf(e.activity_type).effort}</div>
+            )}
             {e.why && <div className="small muted why">Why: {e.why}</div>}
             <input className="small" value={e.notes} placeholder="Note for the patient (optional)"
                    onChange={(ev) => update(i, "notes", ev.target.value)} />
@@ -283,6 +302,13 @@ function ReviewCard({ p, patientId, assessment, doctor, onChanged }) {
           </div>
         ))}
         {exercises.length === 0 && <div className="small muted">No exercises yet.</div>}
+        {exercises.length > 0 && (
+          // Fix 14 (2026-11-20): the weekly dose; the research benefits come from about 150 minutes a week.
+          <div className="small muted">
+            Walking: {walkingMinutes(exercises)} minutes a week (research benefits at about 150). Reviewed 4 weeks
+            after approval.
+          </div>
+        )}
         <select className="small" value="" onChange={(ev) => add(ev.target.value)} disabled={!unused.length}>
           <option value="">+ Add an exercise…</option>
           {unused.map((c) => (
@@ -314,7 +340,13 @@ function ReviewCard({ p, patientId, assessment, doctor, onChanged }) {
   );
 }
 
-const payload = (e) => ({ activity_type: e.activity_type, sets: e.sets, amount: e.amount, notes: e.notes || "" });
+const payload = (e) => ({ activity_type: e.activity_type, sets: e.sets, amount: e.amount, notes: e.notes || "",
+                          ...(e.days_per_week ? { days_per_week: e.days_per_week } : {}) });
+// Walking-type minutes a week (as store.plans.minutes_per_week): minutes × sets × days.
+const WALKING = ["walk", "march_in_place", "seated_march", "running"];
+const walkingMinutes = (xs) =>
+  Math.round(xs.filter((e) => e.unit === "min" && WALKING.includes(e.activity_type))
+    .reduce((n, e) => n + e.amount * e.sets * (e.days_per_week || 0), 0));
 
 function CaseCard({ c, doctor, onChanged }) {
   const [note, setNote] = useState("");

@@ -26,12 +26,12 @@ from __future__ import annotations
 import operator
 import re
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from store.models import Assessment, Condition, Exercise, Plan, PlanProposal, ReadingRule, SafetyRule
+from store.models import Assessment, Condition, Exercise, Plan, PlanProposal, ReadingRule, SafetyRule, TimeWindow
 
 # PROVISIONAL thresholds so we can build; the doctor confirms or replaces them.
 OLDER_AGE = 60         # at or above: high-impact and floor exercises left out, doses one step lower
@@ -83,7 +83,8 @@ def plan_dict(p: Plan | None) -> dict | None:
     if p is None:
         return None
     return {"id": p.id, "doctor_id": p.doctor_id, "instructions": p.instructions, "exercises": p.exercises,
-            "conditions": p.conditions, "given_on": p.created_at.date().isoformat()}
+            "conditions": p.conditions, "given_on": p.created_at.date().isoformat(),
+            "minutes_per_week": minutes_per_week(p.exercises)}
 
 
 def _num(value) -> str:
@@ -112,18 +113,24 @@ def patient_plan(db: Session, p: Plan | None, doctor_name: str | None) -> dict |
     if p is None:
         return None
     by_type = {e.activity_type: e for e in db.scalars(select(Exercise))}
-    exercises = []
+    exercises, weekly = [], []
     for x in p.exercises:
         ex = by_type.get(x.get("activity_type"))
         per_side = bool(ex and ex.per_side)
         rest = ex.rest_seconds if ex and ex.rest_seconds and x["sets"] > 1 else None
+        # A plan approved before fix 14 has no days: the exercise's default.
+        days = x.get("days_per_week") or (ex.days_per_week if ex else None)
+        weekly.append({**x, "days_per_week": days})
         exercises.append({"name": x.get("name") or (ex.display_name if ex else x.get("activity_type")),
                           "dose": dose_text(x["sets"], x["amount"], x.get("unit") or (ex.amount_unit if ex else ""),
                                             ex.prescription_type if ex else None, per_side),
+                          "how_often": days_text(days), "effort": ex.effort if ex else "",
                           "rest_seconds": rest, "steps": list(ex.instructions) if ex else [],
                           "notes": x.get("notes") or ""})
+    review_on = (p.created_at + timedelta(days=review_days(db))).date().isoformat()
     return {"doctor_name": doctor_name, "given_on": p.created_at.date().isoformat(),
-            "instructions": p.instructions, "exercises": exercises}
+            "instructions": p.instructions, "exercises": exercises,
+            "minutes_per_week": minutes_per_week(weekly), "review_on": review_on}
 
 
 def proposal_dict(p: PlanProposal | None, full: bool = False) -> dict | None:
@@ -133,12 +140,20 @@ def proposal_dict(p: PlanProposal | None, full: bool = False) -> dict | None:
            "requested_on": p.created_at.date().isoformat()}
     if full:  # for the doctor; the patient only sees the status
         out |= {"instructions": p.instructions, "exercises": p.exercises, "changes": p.changes,
+                "minutes_per_week": minutes_per_week(p.exercises),
+                "ask_first": p.ask_first or [],
                 "reason": p.reason, "conditions": p.conditions, "patient_note": p.patient_note,
                 "review_note": p.review_note}
     return out
 
 
 # ── The rules ───────────────────────────────────────────────────────────────
+
+# A research line's prefix: the condition, not its control, which the
+# assessment decides and may name differently ("BP above target", "Diabetes,
+# control not known"; fix 09, 2026-11-20).
+EVIDENCE_NAMES = {"bp_controlled": "BP", "diabetes_controlled": "Diabetes", "asthma_controlled": "Asthma"}
+
 
 def approved_exercises(db: Session, codes: list[str]) -> list[dict]:
     """Exercises allowed for *every* condition. Fails closed: a "refer"
@@ -156,7 +171,8 @@ def approved_exercises(db: Session, codes: list[str]) -> list[dict]:
         if set(by_condition) != set(codes) or any(r.verdict == "avoid" for r in by_condition.values()):
             continue
         notes = [r.note for r in by_condition.values() if r.verdict == "modify" and r.note]
-        names = {c.code: re.sub(r"\s*\(.*?\)", "", c.display_name) for c in conditions}  # "Fungal skin infection (tinea)" -> "Fungal skin infection"
+        names = {c.code: EVIDENCE_NAMES.get(c.code) or re.sub(r"\s*\(.*?\)", "", c.display_name)
+                 for c in conditions}  # "Fungal skin infection (tinea)" -> "Fungal skin infection"
         benefits = [f"{names[code]}: {by_condition[code].benefit}" for code in codes
                     if code in by_condition and by_condition[code].benefit]
         approved.append({"activity_type": ex.activity_type, "display_name": ex.display_name,
@@ -226,7 +242,9 @@ def candidates(db: Session, codes: list[str], age: int | None,
         ex = by_type[e["activity_type"]]
         out.append({"activity_type": e["activity_type"], "name": e["display_name"], "unit": e["unit"],
                     "sets": e["default_sets"], "amount": amount, "notes": " ".join(e["notes"]),
-                    "verdict": e["verdict"], "benefits": e["benefits"],  # research lines, per condition
+                    # research lines, per condition; one about older people only at OLDER_AGE+ (fix 09)
+                    "verdict": e["verdict"], "days_per_week": by_type[e["activity_type"]].days_per_week,
+                    "effort": by_type[e["activity_type"]].effort, "benefits": [b for b in e["benefits"] if older or "older people" not in b],
                     # for plan_slots(): the exercise's type, body part and usefulness for these conditions
                     "exercise_type": ex.exercise_type, "body_part": ex.body_part or "",
                     "rank": (ranks.get(e["activity_type"]) or 99, ex.priority_order)})
@@ -236,8 +254,29 @@ def candidates(db: Session, codes: list[str], age: int | None,
 
 
 def plan_entry(e: dict) -> dict:
-    """An exercise as it is stored in a plan."""
-    return {k: e[k] for k in ("activity_type", "name", "unit", "sets", "amount", "notes")}
+    """An exercise as it is stored in a plan (with days a week since fix 14)."""
+    return {k: e[k] for k in ("activity_type", "name", "unit", "sets", "amount", "notes", "days_per_week")}
+
+
+# ── The weekly plan (fix 14, 2026-11-20) ────────────────────────────────────
+
+REVIEW_DAYS = 28  # data/time_windows.csv, row review/plan, overrides it
+
+
+def review_days(db: Session) -> int:
+    row = db.scalars(select(TimeWindow).where(TimeWindow.what == "review", TimeWindow.counts_from == "plan")).first()
+    return (row.days if row and row.days else None) or REVIEW_DAYS
+
+
+def minutes_per_week(exercises: list[dict]) -> int:
+    """The walking-type minutes a week: minutes x sets x days (the exercises
+    dosed in minutes). The research benefits come from about 150 a week."""
+    return int(sum(x["amount"] * x["sets"] * (x.get("days_per_week") or 0)
+                   for x in exercises if x.get("unit") == "min" and x.get("activity_type") in CORE_AEROBIC + ("running",)))
+
+
+def days_text(days: int | None) -> str:
+    return "" if not days else "every day" if days >= 7 else f"{days} days a week"
 
 
 def starter_exercises(db: Session, codes: list[str], age: int | None, bmi: float | None,
@@ -352,6 +391,9 @@ def violations(db: Session, exercises: list[dict], codes: list[str],
             problems.append(f"{ex.display_name}: {sets} sets (allowed 1 to {ex.max_sets})")
         if isinstance(amount, bool) or not isinstance(amount, (int, float)) or not 0 < amount <= ex.max_amount:
             problems.append(f"{ex.display_name}: {amount} {ex.amount_unit} (allowed up to {ex.max_amount:g})")
+        days = x.get("days_per_week")
+        if days is not None and (isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 7):
+            problems.append(f"{ex.display_name}: {days} days a week (allowed 1 to 7)")
     return problems
 
 
@@ -546,6 +588,7 @@ def exercise_catalog(db: Session, codes: list[str], readings: dict | None = None
             verdict, notes = "not advised", {blocked[ex.activity_type]: None, **notes}
         out.append({"activity_type": ex.activity_type, "name": ex.display_name, "unit": ex.amount_unit,
                     "default_sets": ex.default_sets, "default_amount": ex.default_amount, "max_sets": ex.max_sets,
+                    "days_per_week": ex.days_per_week, "effort": ex.effort,
                     "max_amount": ex.max_amount, "per_side": ex.per_side, "verdict": verdict,
                     "notes": " ".join(notes)})
     return out
@@ -569,8 +612,13 @@ def doctor_exercises(db: Session, items: list[dict]) -> list[dict]:
             raise ValueError(f"{ex.display_name}: sets must be a whole number, at least 1")
         if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount <= 0:
             raise ValueError(f"{ex.display_name}: the amount must be more than 0")
+        days = x.get("days_per_week")
+        days = ex.days_per_week if days is None else days  # not given (or None from the API): the default
+        if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 7:
+            raise ValueError(f"{ex.display_name}: days a week must be a whole number from 1 to 7")
         out.append({"activity_type": ex.activity_type, "name": ex.display_name, "unit": ex.amount_unit,
-                    "sets": sets, "amount": float(amount), "notes": (x.get("notes") or "").strip()})
+                    "sets": sets, "amount": float(amount), "notes": (x.get("notes") or "").strip(),
+                    "days_per_week": days})
     return out
 
 
@@ -633,7 +681,7 @@ def exercise_changes(old: list[dict], new: list[dict]) -> list[dict]:
         dose = {"sets": e["sets"], "amount": e["amount"]}
         if was is None:
             out.append({"activity_type": kind, "name": e["name"], "from": None, "to": dose, "note": "Added"})
-        elif (was["sets"], was["amount"]) != (e["sets"], e["amount"]):
+        elif (was["sets"], was["amount"], was.get("days_per_week")) != (e["sets"], e["amount"], e.get("days_per_week")):
             out.append({"activity_type": kind, "name": e["name"], "from": {"sets": was["sets"], "amount": was["amount"]},
                         "to": dose, "note": "Dose changed"})
     return out

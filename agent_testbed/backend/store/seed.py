@@ -19,7 +19,8 @@ from sqlalchemy import text
 
 from store import reference
 from store.db import SCHEMA, Base, engine, session
-from store.models import Condition, ConditionAlias, Exercise, ReadingRule, SafetyRule, TimeWindow, WarningComplaint
+from store.models import (AskQuestion, Condition, ConditionAlias, Exercise, ReadingRule, SafetyRule, TimeWindow,
+                          WarningComplaint)
 
 log = logging.getLogger("store.seed")
 
@@ -48,6 +49,7 @@ ADDED_COLUMNS = (
     f'ALTER TABLE "{SCHEMA}".plan_proposals ADD COLUMN IF NOT EXISTS assessment_id VARCHAR(36) '
     f'REFERENCES "{SCHEMA}".assessments (id)',
     f'ALTER TABLE "{SCHEMA}".assessments ADD COLUMN IF NOT EXISTS readings JSON',
+    f'ALTER TABLE "{SCHEMA}".plan_proposals ADD COLUMN IF NOT EXISTS ask_first JSON',
 )
 
 
@@ -55,7 +57,7 @@ def init_store() -> None:
     with engine.begin() as conn:
         conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
     # Reference tables are rebuilt from their sources, so their columns follow the models.
-    for model in (SafetyRule, ReadingRule, ConditionAlias, WarningComplaint, TimeWindow, Exercise, Condition):
+    for model in (SafetyRule, ReadingRule, ConditionAlias, WarningComplaint, TimeWindow, AskQuestion, Exercise, Condition):
         model.__table__.drop(engine, checkfirst=True)
     Base.metadata.create_all(engine)
     with engine.begin() as conn:
@@ -73,10 +75,13 @@ def init_store() -> None:
         db.flush()
         db.add_all(SafetyRule(**r) for r in rules.values())
         db.add_all(ConditionAlias(**a) for a in aliases)
-        db.add_all(WarningComplaint(phrase=r["phrase"].strip().lower(), label=r["label"])
+        db.add_all(WarningComplaint(phrase=r["phrase"].strip().lower(), label=r["label"],
+                                    stops=(r.get("stops") or "yes").strip().lower() != "no")
                    for r in _rows("warning_complaints.csv"))
         db.add_all(ReadingRule(**r) for r in reading_rules())
         db.add_all(TimeWindow(**w) for w in time_windows(conditions))
+        db.add_all(AskQuestion(who=r["who"].strip(), question=r["question"].strip())
+                   for r in _rows("ask_before_approving.csv") if r.get("question"))
 
 
 # Allowed values of the exercise properties the reading rules select on.
@@ -140,6 +145,8 @@ def time_windows(conditions: dict) -> list[dict]:
         known = what in READING_FIELDS if counts_from == "reading" else (
             (counts_from, what) == ("flag", "clinic_flag")  # the API's clinical flags (agent.assess.clinic_flags)
             or (counts_from, what) == ("prescription", "medicine")  # medicines the assessment AI sees (agent.assess._record)
+            or (counts_from, what) == ("record", "latest_visit")  # a draft from an older record is provisional (fix 12)
+            or (counts_from, what) == ("plan", "review")  # an approved plan's review date (fix 14)
             or counts_from in ("diagnosis", "complaint") and (what in conditions or what in ("any", "warning")))
         if not known or (days and not days.isdigit()):
             log.warning("Time window %r dropped: unknown condition, source or days", r)
@@ -178,6 +185,7 @@ def _from_csv() -> tuple[dict, dict, dict]:
         "max_sets": _int(r["max_sets"], 1), "max_amount": _float(r["max_amount"], 1),
         "per_side": r["per_side"].strip().lower() == "true", "rest_seconds": _int(r["rest_seconds"]),
         "progression_step": _float(r["progression_step"], 1), "priority_order": _int(r["priority_order"], 0),
+        "days_per_week": min(max(_int(r.get("days_per_week"), 3), 1), 7), "effort": (r.get("effort") or "").strip(),
         # Steps and picture links, each separated by "|" (copied from the
         # reference DB on 2026-11-04 for the exercises it had them for).
         "instructions": [s.strip() for s in (r.get("instructions") or "").split("|") if s.strip()],

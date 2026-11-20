@@ -219,6 +219,7 @@ class ExerciseIn(BaseModel):
     sets: int = Field(ge=1, le=50)
     amount: float = Field(gt=0, le=1000)
     notes: str = Field(default="", max_length=500)
+    days_per_week: int | None = Field(default=None, ge=1, le=7)  # the weekly plan (fix 14); None: the exercise's default
 
 
 class CheckIn(BaseModel):

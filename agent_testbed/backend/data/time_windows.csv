@@ -14,3 +14,5 @@ clinic_flag,flag,183,"POC value (2026-11-16). The clinical flags from the Patien
 medicine,prescription,90,"POC value (2026-11-16). The assessment AI sees a visit's medicines only when the visit is this recent (like BP and sugar), so it can note how current medicines affect exercise. No rules use medicines. To confirm with the doctor."
 skin_infection,diagnosis,30,POC value (2026-11-17). Shingles and skin infections usually settle in 2-4 weeks. To confirm with the doctor.
 skin_infection,complaint,30,POC value (2026-11-17). Shingles and skin infections usually settle in 2-4 weeks. To confirm with the doctor.
+latest_visit,record,30,"POC value (2026-11-20, fix 12). A draft is provisional when the latest visit is older than this, or the record has fewer than 2 visit dates. To confirm with the doctor."
+review,plan,28,"POC value (2026-11-20, fix 14). The doctor reviews an approved plan this many days after approving it, and may raise the dose then (no automatic progression). To confirm with the doctor."

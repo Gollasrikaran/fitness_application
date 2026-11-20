@@ -89,6 +89,9 @@ def _taking(item: dict, prescribed: str, today: date, medicine_days: int | None)
     return medicine_days is None or is_recent(prescribed, today, medicine_days)
 
 
+ENDED = "every course on this prescription has ended: the patient takes no medicine from it now"
+
+
 def _latest_prescription(context: dict, today: date | None, medicine_days: int | None) -> dict | None:
     """The latest prescription, for the AI's medicine_notes: only the
     medicines still being taken (fix 04: 30ca6dbf got drowsiness warnings for
@@ -99,10 +102,33 @@ def _latest_prescription(context: dict, today: date | None, medicine_days: int |
     if today is None:
         return {"date": meds["from"], "medicines": meds["items"]}
     taking = [m for m in meds["items"] if _taking(m, meds["from"], today, medicine_days)]
-    return {"date": meds["from"], "medicines": taking} if taking else None
+    if taking:
+        return {"date": meds["from"], "medicines": taking}
+    # Every course has ended (2026-11-20, after the test run): said in so many
+    # words, or the AI lists "current medicines" as missing.
+    return {"date": meds["from"], "medicines": [], "note": ENDED}
 
 
-def _record(context: dict, today: date | None = None, medicine_days: int | None = None) -> dict:
+def older_complaints(context: dict, today: date | None, days: int | None) -> list[dict]:
+    """Complaints from visits older than the ones the AI reads in full, within
+    the complaint window (fix 10, 2026-11-20): 6959e408's "Muscles pain in
+    legs" (14 Jul) was the 11th visit, so nobody saw it. Date and words only,
+    newest first, each once."""
+    shown = {str(v["date"])[:10] for v in context["visits"]}
+    out, seen = [], set()
+    for v in context.get("visits_all") or []:
+        day, text = str(v["date"])[:10], (v.get("complaint") or "").strip()
+        if not text or day in shown or (day, text.lower()) in seen:
+            continue
+        if today is not None and days is not None and not is_recent(day, today, days):
+            continue
+        seen.add((day, text.lower()))
+        out.append({"date": day, "complaint": text})
+    return out
+
+
+def _record(context: dict, today: date | None = None, medicine_days: int | None = None,
+            complaint_days: int | None = None) -> dict:
     """What the AI reads: the clinical facts only."""
     return {"patient": {k: context["patient"][k] for k in ("age", "sex")}, "body": context["body"],
             "latest_prescription": _latest_prescription(context, today, medicine_days),
@@ -110,6 +136,7 @@ def _record(context: dict, today: date | None = None, medicine_days: int | None 
             "condition_list": context["conditions"]["long_term_conditions"],
             "health_history": context["conditions"]["health_history"], "history_other": context["history_other"],
             "visits": _visits_for_ai(context["visits"], today, medicine_days),
+            "older_complaints": older_complaints(context, today, complaint_days),
             "vital_flags": context["vital_flags"], "alerts": context["alerts"]}
 
 
@@ -269,6 +296,17 @@ def about_provisional(item: str) -> bool:
     return bool(_PROVISIONAL.search(item or ""))
 
 
+_QUOTED = re.compile(r'"([^"]+)"')
+
+
+def new_unlisted(unlisted: list[str], concerns: list[str]) -> list[str]:
+    """The AI's "Not in our exercise list: "<quote>"" items, without those
+    whose quote a rules concern already shows (6959e408, 2026-11-20: leg pain
+    twice, once as the rules' leg-pain concern and once from the AI)."""
+    shown = " ".join(concerns).lower()
+    return [u for u in unlisted if not ((m := _QUOTED.search(u)) and m[1].strip().lower() in shown)]
+
+
 _MISSING_READING = {"bp": re.compile(r"\b(blood pressure|bp)\b", re.I),
                     "sugar": re.compile(r"\b(sugar|glucose)\b", re.I)}
 
@@ -287,7 +325,7 @@ def run_assessment(patient_id: str, doctor_id: str, today: date | None = None,
     with session() as db:
         ref = load_reference(db)
     rules = rule_findings(context, ref, today)
-    record = _record(context, today, ref.medicine_days())
+    record = _record(context, today, ref.medicine_days(), ref.complaint_days())
 
     windows = {m: ref.windows.get((m, "reading")) or d for m, d in plan_store.READING_WINDOWS.items()}
     readings = plan_store.latest_readings(context["vitals_recent"], today, reading_days, windows)
@@ -309,7 +347,7 @@ def run_assessment(patient_id: str, doctor_id: str, today: date | None = None,
             severity=result["severity"], severe_reasons=result["severe_reasons"],
             problem=shown.get("problem", ""), body_area=(ai or {}).get("body_area", ""),
             concerns=[*result["concerns"], *shown.get("concerns", []),
-                      *flag_concerns(context, today, ref.flag_days()), *unlisted], missing=_drop_known_missing((ai or {}).get("missing", []), readings),
+                      *flag_concerns(context, today, ref.flag_days()), *new_unlisted(unlisted, result["concerns"])], missing=_drop_known_missing((ai or {}).get("missing", []), readings),
             unmapped=rules.unmapped, warnings=rules.warnings, ai_status="ok" if ai else "failed",
             ai_output=ai, dropped=dropped, model=MODEL,
             readings={**readings, "days": reading_days, "windows": windows})

@@ -51,6 +51,10 @@ class Exercise(Base):
     rest_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     progression_step: Mapped[float] = mapped_column(Float, default=1)
     priority_order: Mapped[int] = mapped_column(Integer, default=0)
+    # The weekly plan (fix 14, 2026-11-20): how many days a week, and how hard
+    # in plain words (data/activity_taxonomy.csv).
+    days_per_week: Mapped[int] = mapped_column(Integer, default=3)
+    effort: Mapped[str] = mapped_column(Text, default="")
     # Properties the reading rules (ReadingRule) select on
     exercise_type: Mapped[str] = mapped_column(String(16), default="")  # aerobic | strength | isometric | mobility | stretch | breathing | balance
     intensity: Mapped[str] = mapped_column(String(16), default="")  # light | moderate | vigorous
@@ -117,10 +121,22 @@ class ConditionAlias(Base):
 
 class WarningComplaint(Base):
     """A chief complaint that sends the patient to a doctor
-    (data/warning_complaints.csv), e.g. chest pain."""
+    (data/warning_complaints.csv), e.g. chest pain. stops=False: shown to the
+    doctor as a concern only, e.g. leg pain (fix 10, 2026-11-20)."""
     __tablename__ = "warning_complaints"
     phrase: Mapped[str] = mapped_column(String(128), primary_key=True)
     label: Mapped[str] = mapped_column(String(64))
+    stops: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class AskQuestion(Base):
+    """A question the doctor should ask before approving a plan
+    (data/ask_before_approving.csv, fix 11). who: "all", "age60",
+    "women18_49", or condition codes separated by "|"."""
+    __tablename__ = "ask_before_approving"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    who: Mapped[str] = mapped_column(String(256))
+    question: Mapped[str] = mapped_column(Text)
 
 
 class TimeWindow(Base):
@@ -234,5 +250,8 @@ class PlanProposal(Base):
     approved_plan_id: Mapped[str | None] = mapped_column(ForeignKey("plans.id"), nullable=True)
     reviewed_by: Mapped[str | None] = mapped_column(String(36), nullable=True)  # doctor id
     review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # "Ask before approving" (fix 11, 2026-11-20): the fixed questions for this
+    # patient (data/ask_before_approving.csv) and the rules' own items.
+    ask_first: Mapped[list] = mapped_column(JSON, default=list)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

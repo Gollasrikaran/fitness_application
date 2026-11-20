@@ -58,7 +58,9 @@ def test_csv_values():
                  ("any", "complaint"): 183, ("warning", "complaint"): 183,
                  ("clinic_flag", "flag"): 183,  # the API's clinical flags sent to the AI (2026-11-16)
                  ("medicine", "prescription"): 90,  # medicines the assessment AI sees (2026-11-16)
-                 ("skin_infection", "diagnosis"): 30, ("skin_infection", "complaint"): 30}  # shingles etc. (2026-11-17)
+                 ("skin_infection", "diagnosis"): 30, ("skin_infection", "complaint"): 30,  # shingles etc. (2026-11-17)
+                 ("latest_visit", "record"): 30,  # older latest visit: a provisional draft (fix 12, 2026-11-20)
+                 ("review", "plan"): 28}  # an approved plan's review date (fix 14, 2026-11-20)
 
 
 # ── Diagnoses ───────────────────────────────────────────────────────────────

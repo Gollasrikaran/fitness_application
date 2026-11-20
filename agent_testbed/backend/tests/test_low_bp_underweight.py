@@ -113,3 +113,34 @@ def test_bmi_severity_and_concern(db, bmi, severe, concern):
     assert (out["severity"] == "severe") == severe
     assert any("severe thinness" in r for r in out["severe_reasons"]) == severe
     assert any(c.startswith("Underweight") for c in out["concerns"]) == concern
+
+
+# ── Heights that differ between visits (fix 08, 2026-11-20) ─────────────────
+
+from agent.routing import _height_concerns
+
+
+def heights_ctx(weight, *heights):
+    """heights: (date, cm), newest first; the first is the one the BMI uses."""
+    return {"visits": [], "body": {"weight_kg": weight, "height_cm": heights[0][1]},
+            "vitals_recent": [{"date": d, "height_cm": h} for d, h in heights]}
+
+
+def test_a_height_that_changes_shows_both_bmis():
+    """6959e408: 158 cm now, 165 cm in May and June, 78 kg."""
+    [line] = _height_concerns(heights_ctx(78, ("2026-10-10", 158.0), ("2026-08-10", 158.0), ("2026-06-01", 165.0),
+                                          ("2026-05-18", 165.0)))
+    assert line.startswith("Height recorded differently between visits: 158 cm (latest, 2026-10-10), "
+                           "165 cm (2026-06-01). With 78 kg that is BMI 31.2 or 28.7.")
+    assert "The BMI 30 rules depend on which is right" in line
+
+
+def test_heights_within_2_cm_are_the_same():
+    assert _height_concerns(heights_ctx(53, ("2026-10-03", 159.0), ("2026-09-08", 160.0), ("2026-08-01", 161.0))) == []
+
+
+def test_several_heights_and_no_threshold_crossed():
+    """069d26fe: 159-164 cm at 53 kg, BMI 19.7-21: no rule depends on it."""
+    [line] = _height_concerns(heights_ctx(53, ("2026-10-03", 159.0), ("2026-08-10", 164.0), ("2026-07-31", 162.0)))
+    assert "159 cm (latest, 2026-10-03), 164 cm (2026-08-10), 162 cm (2026-07-31)" in line
+    assert "BMI 19.7 to 21 (latest 21)" in line and "depend on" not in line

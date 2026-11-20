@@ -550,11 +550,11 @@ def test_the_ai_sees_medicines_only_from_recent_visits(db):
     assert ref.medicine_days() == 90  # data/time_windows.csv, row "medicine"
     ctx = clinic_api.build_context({**SUMMARY, "visits": []}, MEDICINE_TIMELINE, {}, TODAY)
     visits = _record(ctx, date(2026, 12, 1), ref.medicine_days())["visits"]
-    assert [(v["date"], len(v.get("medicines", []))) for v in visits] == [
-        ("2026-10-01", 2), ("2026-09-28", 2), ("2026-09-28", 0), ("2026-08-27", 0)]
-    assert visits[3]["date"] == "2026-08-27"  # the visit itself stays, only its medicines go
-    assert ctx["visits"][3]["medicines"]  # the doctor's screen still has them
-    assert len(_record(ctx)["visits"][3]["medicines"]) == 3  # no window given: unchanged
+    assert [(v["date"], len(v.get("medicines", []))) for v in visits] == [  # one visit per date (fix 10)
+        ("2026-10-01", 2), ("2026-09-28", 2), ("2026-08-27", 0)]
+    assert visits[2]["date"] == "2026-08-27"  # the visit itself stays, only its medicines go
+    assert ctx["visits"][2]["medicines"]  # the doctor's screen still has them
+    assert len(_record(ctx)["visits"][2]["medicines"]) == 3  # no window given: unchanged
 
 
 def test_an_old_medicine_is_not_evidence(db):
@@ -650,11 +650,12 @@ def test_raw_field_names_in_the_ais_evidence_are_reworded():
 
 def test_the_ai_gets_the_latest_prescription_only_while_it_is_taken():
     """Fix 04 (2026-11-20): a course ends at prescription date + duration."""
-    from agent.assess import _record
+    from agent.assess import ENDED, _record
     ctx = clinic_api.build_context({**SUMMARY, "visits": []}, MEDICINE_TIMELINE, {}, TODAY)
     assert _record(ctx, date(2026, 10, 5), 90)["latest_prescription"] == {
         "date": "2026-10-01", "medicines": ctx["medicines"]["items"]}  # 10-day courses from 1 Oct: still taken
-    assert _record(ctx, date(2026, 11, 16), 90)["latest_prescription"] is None  # ended on 11 Oct
+    assert _record(ctx, date(2026, 11, 16), 90)["latest_prescription"] == {  # ended on 11 Oct: said so
+        "date": "2026-10-01", "medicines": [], "note": ENDED}
     assert _record({**ctx, "medicines": {"from": None, "items": []}}, TODAY, 90)["latest_prescription"] is None
 
 
@@ -674,13 +675,14 @@ def test_course_days(item, days):
 def test_only_the_medicines_still_taken_reach_the_ai():
     """30ca6dbf: a 5- and a 7-day course from 26 Sep, draft on 20 Nov; plus a
     medicine with no duration, which keeps the 90-day window."""
-    from agent.assess import _latest_prescription
+    from agent.assess import ENDED, _latest_prescription
     ctx = {"medicines": {"from": "2026-09-26", "items": [
         {"name": "Cough syrup — 1-0-1 · After food · 5 days"}, {"name": "Cetirizine — 0-0-1 · After food · 7 days"},
         {"name": "Thyronorm — 1-0-0 · 90 days"}, {"name": "Inhaler — SOS"}]}}
     out = _latest_prescription(ctx, date(2026, 11, 20), 90)
     assert [m["name"].split(" —")[0] for m in out["medicines"]] == ["Thyronorm", "Inhaler"]
-    assert _latest_prescription(ctx, date(2027, 1, 20), 90) is None  # everything over
+    assert _latest_prescription(ctx, date(2027, 1, 20), 90) == {  # everything over: said so, not "not known"
+        "date": "2026-09-26", "medicines": [], "note": ENDED}
 
 
 @pytest.mark.parametrize("name, key", [
@@ -736,3 +738,66 @@ def test_a_scan_fills_a_field_nothing_was_typed_in():
     v1 = clinic_api.parse_timeline(DOCUMENT_TIMELINE)[2]
     assert (v1["complaint"], v1["provisional"]) == ("Dark patches on leg", "Eczema")
     assert v1["from_document"] == ["provisional", "complaint"]
+
+
+# ── One visit per date, and the older complaints (fix 10, 2026-11-20) ───────
+# 6959e408: 20 records, two a day; the latest 10 were only 6 dates, so
+# "Muscles pain in legs" (14 Jul, the 11th record) reached nobody.
+
+def test_records_of_one_day_become_one_visit():
+    a = {"date": "2026-09-17", "complaint": "Itching,follow up", "doctor": "Dr A", "vitals": {"bp": "130/90", "pulse": 96.0},
+         "medicines": [{"name": "Cetirizine"}]}
+    b = {"date": "2026-09-17", "complaint": "Itching,follow up", "diagnosis_provisional": "Tinea", "doctor": "Dr B",
+         "vitals": {"pulse": 93.0, "spo2": 99.0}, "medicines": [{"name": "Cetirizine"}, {"name": "Itraconazole"}]}
+    c = {"date": "2026-08-29", "complaint": "Follow up"}
+    [day, other] = clinic_api.merge_same_day([a, b, c])
+    assert day["complaint"] == "Itching,follow up" and day["diagnosis_provisional"] == "Tinea"
+    assert day["doctor"] == "Dr A / Dr B"
+    assert day["vitals"] == {"bp": "130/90", "pulse": 96.0, "spo2": 99.0}  # the first record's reading wins
+    assert [m["name"] for m in day["medicines"]] == ["Cetirizine", "Itraconazole"]
+    assert other == c
+
+
+def test_two_complaints_on_one_day_are_both_kept():
+    [day] = clinic_api.merge_same_day([{"date": "2026-07-20", "complaint": "Htn , weakness"},
+                                       {"date": "2026-07-20", "complaint": "Itching, tinea"}])
+    assert day["complaint"] == "Htn , weakness; Itching, tinea"
+
+
+def test_older_complaints_reach_the_ai_within_the_window():
+    from agent.assess import older_complaints
+    ctx = {"visits": [{"date": "2026-10-10"}, {"date": "2026-07-20"}],
+           "visits_all": [{"date": "2026-10-10", "complaint": "Follow up"}, {"date": "2026-07-20", "complaint": "Htn"},
+                          {"date": "2026-07-14", "complaint": "Muscles pain in legs"},
+                          {"date": "2026-07-14", "complaint": "Follow up"},
+                          {"date": "2026-01-10", "complaint": "Knee pain"}]}  # older than 183 days
+    assert older_complaints(ctx, date(2026, 11, 20), 183) == [
+        {"date": "2026-07-14", "complaint": "Muscles pain in legs"}, {"date": "2026-07-14", "complaint": "Follow up"}]
+
+
+def test_leg_pain_is_a_concern_not_a_stop(db):
+    from agent.conditions import load_reference, rule_findings
+    from agent.routing import finalize
+    from store.models import WarningComplaint
+    from store.seed import _rows
+    ref = load_reference(db)
+    ref.warnings = [WarningComplaint(phrase=r["phrase"].strip().lower(), label=r["label"],
+                                     stops=r["stops"].strip().lower() != "no") for r in _rows("warning_complaints.csv")]
+    ctx = {"visits": [{"date": "2026-07-14", "complaint": "Muscles pain in legs", "vitals": {}}], "vital_flags": [],
+           "alerts": {"emergencies": []}, "patient": {"age": 57}, "body": {},
+           "conditions": {"doctor_recorded": [], "long_term_conditions": [], "health_history": []}}
+    out = finalize(ctx, ref, rule_findings(ctx, ref, date(2026, 11, 20)), None, [], date(2026, 11, 20))
+    assert not any("pain" in r.lower() for r in out["severe_reasons"])
+    assert any(c.startswith('Leg or muscle pain (ask: pain on walking?) in the complaint on 2026-07-14: '
+                            '"Muscles pain in legs". Not a stop on its own') for c in out["concerns"])
+
+
+
+def test_the_ais_not_listed_item_is_dropped_when_a_rules_concern_shows_it():
+    """6959e408 (test run 2026-11-20): the leg pain showed twice."""
+    from agent.assess import new_unlisted
+    rules = ['Leg or muscle pain (ask: pain on walking?) in the complaint on 2026-07-14: "Muscles pain in legs". '
+             "Not a stop on its own: please ask about it before approving."]
+    unlisted = ['Not in our exercise list: "Muscles pain in legs" (visit 2026-07-14, complaint)',
+                'Not in our exercise list: "Shoulder pain" (visit 2026-07-14, complaint)']
+    assert new_unlisted(unlisted, rules) == [unlisted[1]]

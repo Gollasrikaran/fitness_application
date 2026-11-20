@@ -1,0 +1,15 @@
+who,question,note
+all,"Chest pain, breathlessness or dizziness when active?",ACSM pre-exercise screening; POC 2026-11-20 (fix 11)
+all,Pain in the legs when walking?,"Claudication; 6959e408 had leg pain the plan didn't ask about"
+all,How much do they walk or move in a day now?,Activity level sets how hard to start
+all,Do they smoke?,
+age60,Any falls in the last year?,
+age60,Can they get down to the floor and up again on their own?,"Ability, not age, decides floor exercises (manager's R1, R2)"
+women18_49,"Pregnant, or planning a pregnancy?",Pregnancy changes the plan entirely (refer)
+diabetes_controlled|diabetes|prediabetes,"Feet and eyes checked recently (cuts, numbness, eye problems)?",research/DIABETES.md
+diabetes_controlled|diabetes,On sugar tablets or insulin? (Low sugar during exercise),research/DIABETES.md; a question for the doctor only
+asthma_controlled|asthma_uncontrolled,How often is the reliever inhaler used? Any symptoms at night?,research/ASTHMA.md (GINA control questions)
+bp_controlled|high_bp,Any home BP readings?,research/HYPERTENSION.md
+skin_fungal|skin_dermatitis,Is the skin broken or oozing anywhere?,research/SKIN.md
+hypothyroid|hyperthyroid,On thyroid treatment and taking it regularly?,research/THYROID.md
+chronic_back_pain|herniated_disk|degenerative_disc|spinal_stenosis|spondylosis,"Pain spreading below the knee, or an arm or leg that tingles or feels weak?",research/JOINT_AND_BACK_PAIN.md (red flags)

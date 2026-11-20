@@ -26,12 +26,19 @@ export default function PatientPlan({ patientId }) {
         From {plan.doctor_name ? `Dr. ${plan.doctor_name}` : "your doctor"} · {plan.given_on}
       </p>
       {plan.instructions && <p className="plan-note pre">{plan.instructions}</p>}
+      {plan.review_on && (
+        <p className="from">Your doctor will review this plan on {plan.review_on}.</p>
+      )}
       {plan.exercises.map((e, i) => (
         <section key={i} className="ex-card">
           <h2>
             {i + 1}. {e.name}
           </h2>
-          <p className="dose">{e.dose}</p>
+          <p className="dose">
+            {e.dose}
+            {e.how_often && ` · ${e.how_often}`}
+          </p>
+          {e.effort && <p className="rest">How hard: {e.effort}</p>}
           {e.rest_seconds && <p className="rest">Rest {e.rest_seconds} seconds between sets</p>}
           {e.notes && <p className="doc-note">Doctor's note: {e.notes}</p>}
           {e.steps.length > 0 && (

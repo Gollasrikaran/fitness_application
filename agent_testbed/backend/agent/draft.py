@@ -22,18 +22,21 @@ import json
 import logging
 import re
 from collections.abc import Callable
+from datetime import date
 
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from agent.assess import run_assessment
+from agent.conditions import load_reference
+from agent.routing import _record_span
 from agent.llm import ask_structured
 from agent.prompts import DRAFT
 from app.source import clinic
 from store import plans as plan_store
 from store.db import session
-from store.models import Condition, PlanProposal
+from store.models import AskQuestion, Condition, PlanProposal
 
 log = logging.getLogger("agent.draft")
 
@@ -87,7 +90,16 @@ def _key(text: str) -> str:
 
 
 CORE_WHY = "Main exercise of the plan, always first (set by the safety rules)."
-SLOT_WHY = "{slot}: the best-ranked option for this part of the plan (chosen by the safety rules)."
+# What each part of the plan trains, for an exercise with no research line for
+# the patient's conditions (fix 09, 2026-11-20): says what it works, claims
+# nothing about an illness.
+NO_EVIDENCE = "No research line for this patient's conditions; chosen by the safety rules."
+SLOT_WORKS = {"leg strength": "Leg strength: works the leg muscles used to stand up and walk.",
+              "upper-body strength": "Upper-body strength: works the arm, shoulder and chest muscles.",
+              "balance": "Balance: trains steadiness on the feet.",
+              "breathing": "Breathing: slow, controlled breathing to end the session.",
+              "hand": "Hand: keeps the fingers, thumb and wrist moving.",
+              "other": "Completes the plan: the next best option the safety rules allow."}
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
 
@@ -101,14 +113,18 @@ def _why(e: dict, slot: str | None, ai_line: str | None, known: set[str] = froze
     it, with our research (data/exercise_benefits.csv, the option's EVIDENCE)
     as its only source of health facts. Every number in the AI's line must
     be in that evidence or the patient's own data (`known`: age, BMI);
-    otherwise the line is dropped as possibly invented. Without a usable AI
-    line: our research line, else the rules' standard line."""
+    otherwise the line is dropped as possibly invented, and our research line
+    is shown. An exercise with no research line for the patient's conditions
+    never gets the AI's line (fix 09, option A: "helps you stay calm" for
+    03cf014c had no source): it gets what its part of the plan trains."""
     evidence = "; ".join(e.get("benefits") or [])
+    if not evidence:
+        if slot is None:
+            return CORE_WHY
+        return f"{SLOT_WORKS.get(slot, SLOT_WORKS['other'])} {NO_EVIDENCE}"
     if ai_line and _numbers(ai_line) <= _numbers(evidence) | set(known):
         return ai_line
-    if evidence:
-        return evidence + "."
-    return CORE_WHY if slot is None else SLOT_WHY.format(slot=slot.capitalize())
+    return evidence + "."
 
 
 def _from_ai(answer: AIDraft, allowed: list[dict], known: set[str] = frozenset()
@@ -168,22 +184,54 @@ def _rules_whys(exercises: list[dict], allowed: list[dict]) -> list[dict]:
             for x in exercises]
 
 
+BENEFIT_MINUTES = 150  # walking a week the BP and diabetes research benefits come from (fix 14)
+PROVISIONAL_MIN_DATES = 2  # fewer visit dates than this: a provisional draft (fix 12)
+
+
+def provisional_line(record: dict | None, today: date, days: int) -> str | None:
+    """"Provisional draft: …" when the record is thin (fewer than 2 visit
+    dates) or old (latest visit more than `days` ago), else None. `record`:
+    {first, last, dates} (patient_profile). 30ca6dbf, 03cf014c and 1123000d
+    had one visit each, 45 to 72 days before their drafts (fix 12, 2026-11-20)."""
+    if not record or not record.get("last"):
+        return None
+    dates, last = record.get("dates") or 0, date.fromisoformat(str(record["last"])[:10])
+    age = (today - last).days
+    if dates >= PROVISIONAL_MIN_DATES and age <= days:
+        return None
+    based = (f"{dates} visits ({record['first']} to {record['last']})" if dates > 1
+             else f"1 visit ({record['last']})")
+    return (f"Provisional draft: based on {based}, the latest {age} days ago. "
+            "Please check the questions below before approving.")
+
+
 def build_draft(db: Session, patient_id: str, assessment: dict, patient: dict,
-                ask_ai: Callable[[dict, dict, list[dict]], AIDraft] = _ask_ai) -> PlanProposal:
+                ask_ai: Callable[[dict, dict, list[dict]], AIDraft] = _ask_ai,
+                today: date | None = None) -> PlanProposal:
     """Save and return the draft for one assessment. `patient` is
-    {age, sex, bmi}."""
+    {age, sex, bmi, record, ...}."""
     codes = assessment["codes"]
     names = plan_store.condition_names(db, codes)
     label = ", ".join(names.get(c, c) for c in codes)
     current = plan_store.latest_plan(db, patient_id)
     plan_store.pending_superseded(db, patient_id)
+    provisional = provisional_line(patient.get("record"), today or date.today(),
+                                   load_reference(db).latest_visit_days())
 
     def save(source: str, exercises: list[dict], instructions: str, reason: str) -> PlanProposal:
         if patient.get("eligibility_note"):  # information for the doctor only: it never changes the draft
             reason = f"{patient['eligibility_note']}\n{reason}"
+        if provisional:  # the draft is still made: the doctor decides (fix 12)
+            reason = f"{provisional}\n{reason}"
+        weekly = plan_store.minutes_per_week(exercises)
+        if 0 < weekly < BENEFIT_MINUTES:  # E1 (fix 14): the starting dose next to the research's dose
+            reason += (f"\nWalking starts at {weekly} minutes a week; the research benefits are seen at about "
+                       f"{BENEFIT_MINUTES}. The plan is reviewed {plan_store.review_days(db)} days after approval, "
+                       "when the dose can be raised.")
         proposal = PlanProposal(
             patient_id=patient_id, assessment_id=assessment["id"], kind="update" if current else "starter",
             source=source, instructions=instructions, exercises=exercises, reason=reason, conditions=codes,
+            ask_first=([provisional] if provisional else []) + ask_first(db, codes, patient, assessment),
             changes=plan_store.exercise_changes(current.exercises, exercises) if current and exercises else [],
             based_on_plan_id=current.id if current else None)
         db.add(proposal)
@@ -257,6 +305,26 @@ def patient_instructions(db: Session, codes: list[str], opening: str, exercises:
     return "\n".join(line for line in lines if line)
 
 
+# "Ask before approving" (fix 11, 2026-11-20): the same questions for every
+# patient of a kind (data/ask_before_approving.csv), not the AI's varying
+# "missing" list, plus the rules' own items for this patient that ask the
+# doctor to check something (leg pain, a height that changed, dizziness).
+_ASKS = re.compile(r"please ask about it|please check the height|please check it has passed", re.I)
+
+
+def ask_first(db: Session, codes: list[str], patient: dict, assessment: dict) -> list[str]:
+    age, sex = patient.get("age"), str(patient.get("sex") or "").upper()
+    groups = {"all", *codes}
+    if age is not None and age >= plan_store.OLDER_AGE:
+        groups.add("age60")
+    if sex.startswith("F") and age is not None and 18 <= age <= 49:
+        groups.add("women18_49")
+    questions = [q.question for q in db.scalars(select(AskQuestion).order_by(AskQuestion.id))
+                 if groups & {w.strip() for w in q.who.split("|")}]
+    own = [f"From the record: {c}" for c in assessment.get("concerns") or [] if _ASKS.search(c)]
+    return list(dict.fromkeys([*questions, *own]))
+
+
 def assessment_age(patient: dict) -> int | None:
     return patient.get("age")
 
@@ -285,8 +353,9 @@ def patient_profile(context: dict) -> dict:
     (fix 02: 1123000d's plan said the opposite of her doctor's note)."""
     meds = context.get("medicines") or {}
     note = (meds.get("patient_instructions") or "").strip()
+    first, last, dates = _record_span(context)
     return {"age": context["patient"]["age"], "sex": context["patient"]["sex"], "bmi": context["body"]["bmi"],
-            "eligibility_note": eligibility_note(context),
+            "eligibility_note": eligibility_note(context), "record": {"first": first, "last": last, "dates": dates},
             "doctor_instructions": {"date": meds.get("from"), "text": note[:DOCTOR_NOTE_CHARS]} if note else None}
 
 

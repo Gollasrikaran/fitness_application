@@ -61,6 +61,11 @@ class Reference:
         the AI: the "clinic_flag" row, else the complaint window."""
         return self.windows.get(("clinic_flag", "flag")) or self.complaint_days()
 
+    def latest_visit_days(self) -> int:
+        """How old the latest visit can be before a draft is provisional (fix
+        12): the "latest_visit" row, else 30 days."""
+        return self.windows.get(("latest_visit", "record")) or 30
+
     def medicine_days(self) -> int:
         """How old a visit can be for the assessment AI to see its medicines:
         the "medicine" row, else 90 days."""
@@ -80,7 +85,7 @@ class Finding:
 class RuleResult:
     findings: list[Finding] = field(default_factory=list)
     unmapped: list[str] = field(default_factory=list)  # clinic conditions we have no alias for
-    warnings: list[dict] = field(default_factory=list)  # [{label, date, complaint}]
+    warnings: list[dict] = field(default_factory=list)  # [{label, date, complaint, stops}]
     expired: list[str] = field(default_factory=list)  # findings left out as older than their time window
 
 
@@ -134,7 +139,7 @@ def rule_findings(context: dict, ref: Reference, today: date | None = None) -> R
     named = {a.phrase.strip().lower(): a.code for a in ref.aliases if a.source == "long_term_condition"}
     history = {a.phrase.strip().lower(): a.code for a in ref.aliases if a.source == "health_history"}
     phrases = [(words(a.phrase), a.code) for a in ref.aliases if a.source == "text"]
-    warnings = [(words(w.phrase), w.label) for w in ref.warnings]
+    warnings = [(words(w.phrase), w.label, w.stops is not False) for w in ref.warnings]
     out = RuleResult()
 
     def match_text(text: str, day, where: str, complaint: bool) -> None:
@@ -176,9 +181,10 @@ def rule_findings(context: dict, ref: Reference, today: date | None = None) -> R
             match_text(complaint, v["date"], f"visit {v['date']}, complaint", complaint=True)
         if complaint and is_recent(v["date"], today, ref.complaint_days("warning")):
             complaint_words = words(complaint)
-            for phrase_words, label in warnings:
+            for phrase_words, label, stops in warnings:
                 if has_phrase(complaint_words, phrase_words):
-                    out.warnings.append({"label": label, "date": str(v["date"]), "complaint": complaint.strip()})
+                    out.warnings.append({"label": label, "date": str(v["date"]), "complaint": complaint.strip(),
+                                         "stops": stops})
 
     bmi = context["body"].get("bmi")
     if bmi and bmi >= OBESE_BMI:
