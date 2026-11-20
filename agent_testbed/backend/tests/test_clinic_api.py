@@ -319,9 +319,12 @@ def test_the_rules_find_conditions_in_the_api_record(db, ctx):
                     for r in _rows("warning_complaints.csv")]
     rules = rule_findings(ctx, ref, TODAY)
     out = finalize(ctx, ref, rules, {"severity": "mild", "problem": "x"}, [])
-    # The latest BP is flagged BP_SYS_HIGH: the API's flag codes drive the BP rule as the clinic's did.
-    assert {"asthma_uncontrolled", "arthritis_knee", "high_bp"} <= set(out["codes"])
-    assert out["severity"] == "severe"  # breathlessness, an emergency visit, BP not under control
+    # One BP reading (150/94, flagged BP_SYS_HIGH): since fix 03 (2026-11-20) the average of the
+    # readings decides, and one reading means "control not known", with its 140/90 limits.
+    assert {"asthma_uncontrolled", "arthritis_knee", "bp_controlled"} <= set(out["codes"])
+    bp = next(c for c in out["conditions"] if c["code"] == "bp_controlled")
+    assert bp["name"] == "BP, control not known (one reading in 90 days: 150/94)"
+    assert out["severity"] == "severe"  # breathlessness, an emergency visit
 
 
 @pytest.mark.parametrize("diagnosis", ["DJD knee spine", "DJD knee and spine", "DJD spine knee",
@@ -645,13 +648,39 @@ def test_raw_field_names_in_the_ais_evidence_are_reworded():
     assert _tidy_where("recorded_conditions") == "doctor recorded"
 
 
-def test_the_ai_gets_the_latest_prescription_only_if_recent():
+def test_the_ai_gets_the_latest_prescription_only_while_it_is_taken():
+    """Fix 04 (2026-11-20): a course ends at prescription date + duration."""
     from agent.assess import _record
     ctx = clinic_api.build_context({**SUMMARY, "visits": []}, MEDICINE_TIMELINE, {}, TODAY)
-    assert _record(ctx, date(2026, 11, 16), 90)["latest_prescription"] == {
-        "date": "2026-10-01", "medicines": ctx["medicines"]["items"]}
-    assert _record(ctx, date(2027, 1, 15), 90)["latest_prescription"] is None  # 106 days: ended
+    assert _record(ctx, date(2026, 10, 5), 90)["latest_prescription"] == {
+        "date": "2026-10-01", "medicines": ctx["medicines"]["items"]}  # 10-day courses from 1 Oct: still taken
+    assert _record(ctx, date(2026, 11, 16), 90)["latest_prescription"] is None  # ended on 11 Oct
     assert _record({**ctx, "medicines": {"from": None, "items": []}}, TODAY, 90)["latest_prescription"] is None
+
+
+@pytest.mark.parametrize("item, days", [
+    ({"name": "Amlodipine", "duration": "10 days"}, 10),
+    ({"name": "Azee — 1-0-0 · After food · 5 days"}, 5),                     # the API's one-line form
+    ({"name": "vitamin D3 60000 — 0-1-0 · After food · 15 days"}, 15),       # a number in the name isn't the length
+    ({"name": "Thyronorm", "duration": "2 weeks"}, 14),
+    ({"name": "Metformin", "duration": "1 month"}, 30),
+    ({"name": "Clotrimazole + miconazole — 1-1-1"}, None),                   # no duration written
+])
+def test_course_days(item, days):
+    from agent.assess import course_days
+    assert course_days(item) == days
+
+
+def test_only_the_medicines_still_taken_reach_the_ai():
+    """30ca6dbf: a 5- and a 7-day course from 26 Sep, draft on 20 Nov; plus a
+    medicine with no duration, which keeps the 90-day window."""
+    from agent.assess import _latest_prescription
+    ctx = {"medicines": {"from": "2026-09-26", "items": [
+        {"name": "Cough syrup — 1-0-1 · After food · 5 days"}, {"name": "Cetirizine — 0-0-1 · After food · 7 days"},
+        {"name": "Thyronorm — 1-0-0 · 90 days"}, {"name": "Inhaler — SOS"}]}}
+    out = _latest_prescription(ctx, date(2026, 11, 20), 90)
+    assert [m["name"].split(" —")[0] for m in out["medicines"]] == ["Thyronorm", "Inhaler"]
+    assert _latest_prescription(ctx, date(2027, 1, 20), 90) is None  # everything over
 
 
 @pytest.mark.parametrize("name, key", [

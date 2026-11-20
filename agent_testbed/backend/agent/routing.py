@@ -14,12 +14,12 @@ from agent.conditions import Finding, Reference, RuleResult, has_phrase, words
 from datetime import date
 
 from agent.conditions import is_recent
-from store.plans import READING_WINDOWS, SEVERE_THIN_BMI, UNDERWEIGHT_BMI, latest_readings
+from store.plans import (ASSUMED_BP, READING_WINDOWS, SEVERE_THIN_BMI, UNDERWEIGHT_BMI, bp_of, latest_bp, latest_readings,
+                         reading_text)
+
 
 # The clinic's own vital flags (ELEVATED and LOW don't count as "not under control").
-_BP_FLAG = re.compile(r"^BP_(SYS|DIA)_(HIGH|CRITICAL)$")
 _SUGAR_FLAG = re.compile(r"SUGAR_MG_DL_(HIGH|CRITICAL)$")
-_BP_KEYS = ("bp", "bp_sys", "bp_dia")
 _SUGAR_KEYS = ("sugar_mg_dl", "fasting_sugar_mg_dl", "nonfasting_sugar_mg_dl")
 # The AI reports BP, sugar and asthma as "controlled" by default; the rules decide.
 _TO_MARKER = {"bp_controlled": "bp_any", "diabetes_controlled": "diabetes_any", "asthma_controlled": "asthma_any"}
@@ -95,61 +95,145 @@ def _uncontrolled(visits: list[dict], flags: list[dict], flag: re.Pattern, keys:
     return False, f"latest {what} reading ({latest}) not flagged high; nothing critical in the last 5 visits"
 
 
+# BP control from the average of the recent readings (fix 03, 2026-11-20;
+# store.plans.latest_bp): below 140/90 under control; 140-159/90-99 above
+# target (an AI draft, with the 140/90 reading limits); 160/100 or above, or
+# a critical flag, not under control (a doctor writes the plan: ACSM asks
+# for medical clearance from 160/100). One reading only: control not known.
+BP_DOCTOR_AT = (160.0, 100.0)
+_BP_CRITICAL = re.compile(r"^BP_(SYS|DIA)_CRITICAL$")
+
+
+def _bp_control(context: dict, ref: Reference | None, today: date | None) -> tuple[bool | None, str, str | None]:
+    """(not under control: True / False / None for not known, evidence line,
+    the name to show instead of "BP under control", if any)."""
+    critical = sorted({f"{f['code']} on {f['date']}" for f in context["vital_flags"]
+                       if _BP_CRITICAL.match(f["code"]) and f["severity"] == "CRITICAL"})
+    if critical:
+        return True, f"critical BP reading: {', '.join(critical)}", None
+    vitals = context.get("vitals_recent") or [{**v.get("vitals", {}), "date": v["date"]} for v in context["visits"]]
+    days = (ref.windows.get(("bp", "reading")) if ref else None) or READING_WINDOWS["bp"]
+    dates = sorted(str(v["date"])[:10] for v in vitals if v.get("date") and bp_of(v))
+    if not dates:
+        return None, "no BP reading in the recent visits, so whether it is under control is not known", None
+    # No date to count from: the window counts back from the newest reading.
+    today = today or date.fromisoformat(dates[-1])
+    bp = latest_bp(vitals, today, windows={"bp": days})
+    doctor = lambda s, d: s >= BP_DOCTOR_AT[0] or d >= BP_DOCTOR_AT[1]
+    if bp is None:  # nothing within the window: an old reading counts only if it is very high
+        old = latest_bp(vitals, today, days=10 ** 5, windows={"bp": days})
+        if old and doctor(old["sys"], old["dia"]):
+            return True, f"latest BP reading {reading_text('bp', old)}, older than {days} days, at or above 160/100", None
+        return None, f"no BP reading in the last {days} days, so whether it is under control is not known", None
+    s, d, text = bp["sys"], bp["dia"], reading_text("bp", bp)
+    if doctor(s, d):
+        return True, f"BP {text}: at or above 160/100", None
+    if bp.get("count", 1) == 1:
+        return None, f"only one BP reading in the last {days} days ({text}), so whether it is under control is not known", \
+            f"BP, control not known (one reading in {days} days: {s:g}/{d:g})"
+    readings = "; ".join(bp["readings"])
+    if s >= ASSUMED_BP["sys"] or d >= ASSUMED_BP["dia"]:
+        return False, f"BP {text}: above the 140/90 target, below 160/100 ({readings})", \
+            f"BP above target (average {s:g}/{d:g} of {bp['count']} readings)"
+    return False, f"BP {text}: below 140/90 ({readings})", None
+
+
 def _resolve_markers(findings: list[Finding], context: dict, ref: Reference | None = None,
-                     today: date | None = None) -> tuple[list[tuple[str, str]], set[str]]:
-    """bp_any / diabetes_any -> controlled or not, from the clinic's vital
-    flags. Returns (code, evidence line) per decision, and the "controlled"
-    codes decided with no recent reading (shown as "control not known")."""
+                     today: date | None = None) -> tuple[list[tuple[str, str]], dict[str, str]]:
+    """bp_any -> controlled or not from the average BP reading (_bp_control);
+    diabetes_any from the clinic's vital flags. Returns (code, evidence line)
+    per decision, and the names to show instead of the condition's own
+    ("BP above target …", "control not known …")."""
     visits, flags = context["visits"], context["vital_flags"]
-    notes, unknown = [], set()
-    for marker, strict, mild, flag, keys, what, metric in (
-            ("bp_any", "high_bp", "bp_controlled", _BP_FLAG, _BP_KEYS, "BP", "bp"),
-            ("diabetes_any", "diabetes", "diabetes_controlled", _SUGAR_FLAG, _SUGAR_KEYS, "sugar", "sugar")):
-        if not any(f.code in (marker, strict, mild) for f in findings):
-            continue
-        days = ((ref.windows.get((metric, "reading")) if ref else None) or READING_WINDOWS[metric]) if today else None
-        bad, why = _uncontrolled(visits, flags, flag, keys, what, today, days)
+    notes, names = [], {}
+    if any(f.code in ("bp_any", "high_bp", "bp_controlled") for f in findings):
+        bad, why, name = _bp_control(context, ref, today)
         for f in findings:
-            if f.code == marker:
-                f.code = strict if bad else mild
-        notes.append((strict if bad else mild, why))
+            if f.code == "bp_any":
+                f.code = "high_bp" if bad else "bp_controlled"
+        notes.append(("high_bp" if bad else "bp_controlled", why))
         if bad is None:
-            unknown.add(mild)
-    return notes, unknown
+            names["bp_controlled"] = name or _UNKNOWN_NAME["bp_controlled"]
+        elif name:
+            names["bp_controlled"] = name
+    if any(f.code in ("diabetes_any", "diabetes", "diabetes_controlled") for f in findings):
+        days = ((ref.windows.get(("sugar", "reading")) if ref else None) or READING_WINDOWS["sugar"]) if today else None
+        bad, why = _uncontrolled(visits, flags, _SUGAR_FLAG, _SUGAR_KEYS, "sugar", today, days)
+        for f in findings:
+            if f.code == "diabetes_any":
+                f.code = "diabetes" if bad else "diabetes_controlled"
+        notes.append(("diabetes" if bad else "diabetes_controlled", why))
+        if bad is None:
+            names["diabetes_controlled"] = _UNKNOWN_NAME["diabetes_controlled"]
+    return notes, names
 
 
-def _latest_spo2(visits: list[dict]) -> tuple[float, str] | None:
-    """The newest plausible SpO2 (50–100%) in the recent visits, with its date."""
+def _latest_spo2(visits: list[dict], today: date | None = None, days: int | None = None
+                 ) -> tuple[float, str, bool] | None:
+    """The newest plausible SpO2 (50–100%) in the recent visits: (value,
+    date, within its window). The window (`days` before `today`, from
+    data/time_windows.csv) is the readings line's own (fix 05, 2026-11-20);
+    with no `today`, every reading is within it."""
     for v in visits:
         try:
             value = float(str(v.get("vitals", {}).get("spo2", "")).rstrip("%").strip())
         except ValueError:
             continue
         if 50 <= value <= 100:
-            return value, str(v["date"])
+            day = str(v["date"])[:10]
+            recent = today is None or days is None or is_recent(day, today, days)
+            return value, day, recent
     return None
 
 
-def _resolve_asthma(findings: list[Finding], context: dict, rules: RuleResult) -> list[tuple[str, str]]:
+def _record_span(context: dict) -> tuple[str | None, str | None, int]:
+    """(first visit date, last visit date, number of visit dates) of the record."""
+    visits = context.get("visits_all") or context["visits"]
+    dates = sorted({str(v["date"])[:10] for v in visits if v.get("date")})
+    first = str((context.get("care") or {}).get("first_visit") or "")[:10] or (dates[0] if dates else None)
+    return (min(first, dates[0]) if first and dates else first), (dates[-1] if dates else None), len(dates)
+
+
+def _resolve_asthma(findings: list[Finding], context: dict, rules: RuleResult, ref: Reference | None = None,
+                    today: date | None = None) -> tuple[list[tuple[str, str]], str | None]:
     """asthma_any -> asthma_controlled or asthma_uncontrolled. Not under
     control with breathlessness or wheeze in a complaint in the last 6 months,
-    an emergency visit, or a latest SpO2 below 94%. Returns (code, evidence line)."""
+    an emergency visit, or a latest SpO2 below 94%. Returns ((code, evidence
+    line), the name to show instead of "Asthma under control", if any).
+    "Under control" needs a record that covers the complaint window (6
+    months) with 2 or more visit dates: a shorter record can't show 6 months
+    without wheeze, so its asthma is "control not known" (fix 03,
+    2026-11-20). The safety decision is the same either way."""
     if not any(f.code in ("asthma_any", "asthma_controlled", "asthma_uncontrolled") for f in findings):
-        return []
+        return [], None
     why = [f"{w['label'].lower()} in the complaint on {w['date']}" for w in rules.warnings
            if w["label"] in _ASTHMA_COMPLAINTS]
     why += [f"emergency visit on {e['date']}" for e in context["alerts"]["emergencies"]]
-    spo2 = _latest_spo2(context["visits"])
+    first, last, count = _record_span(context)
+    today = today or (date.fromisoformat(last) if last else None)
+    # SpO2 within its window only (fix 05): an old low reading still counts,
+    # as for BP (old bad news stands); an old normal one is never cited.
+    spo2_days = (ref.windows.get(("spo2", "reading")) if ref else None) or READING_WINDOWS["spo2"]
+    spo2 = _latest_spo2(context["visits"], today, spo2_days)
     if spo2 and spo2[0] < ASTHMA_SPO2_BELOW:
-        why.append(f"SpO2 {spo2[0]:g}% on {spo2[1]}")
+        why.append(f"SpO2 {spo2[0]:g}% on {spo2[1]}" + ("" if spo2[2] else f" (older than {spo2_days} days)"))
     code = "asthma_uncontrolled" if why else "asthma_controlled"
     for f in findings:
         if f.code == "asthma_any":
             f.code = code
     if why:
-        return [(code, "not under control: " + "; ".join(dict.fromkeys(why)))]
-    return [(code, "no breathlessness or wheeze in the last 6 months, no emergency visit, "
-                   + (f"SpO2 {spo2[0]:g}% on {spo2[1]}" if spo2 else "no SpO2 reading"))]
+        return [(code, "not under control: " + "; ".join(dict.fromkeys(why)))], None
+    window = ref.complaint_days() if ref else 183
+    short = not first or count < 2 or (today is not None and (today - date.fromisoformat(first)).days < window)
+    span = f"{count} visit{'s' if count != 1 else ''}, {first} to {last}" if first and first != last \
+        else f"1 visit, {last}" if last else "no visits"
+    rest = ", no emergency visit, " + (f"SpO2 {spo2[0]:g}% on {spo2[1]}" if spo2 and spo2[2]
+                                       else f"no SpO2 reading in the last {spo2_days} days")
+    if short:
+        return [(code, f"no breathlessness or wheeze in the record ({span}){rest}; the record is too short to "
+                       f"show {window // 30} months without symptoms")], \
+            f"Asthma, control not known (record: {span})"
+    return [(code, f"no breathlessness or wheeze in the last {window // 30} months{rest}")], None
 
 
 # Thyroid (research/THYROID.md, 2026-11-18; provisional). "Thyroid" with the
@@ -244,8 +328,11 @@ def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
         f.code = _TO_MARKER.get(f.code, f.code)
     # A clinic condition we can't map: a doctor decides.
     findings += [Finding("other_unlisted", "rules", u, u) for u in rules.unmapped]
-    flag_notes, unknown = _resolve_markers(findings, context, ref, today or context.get("as_of"))
-    flag_notes += _resolve_asthma(findings, context, rules)
+    flag_notes, names = _resolve_markers(findings, context, ref, today or context.get("as_of"))
+    asthma_notes, asthma_name = _resolve_asthma(findings, context, rules, ref, today or context.get("as_of"))
+    flag_notes += asthma_notes
+    if asthma_name:
+        names["asthma_controlled"] = asthma_name
     thyroid_notes, thyroid_guessed = _resolve_thyroid(findings, context, ref, today or context.get("as_of"))
     flag_notes += thyroid_notes
 
@@ -262,14 +349,14 @@ def finalize(context: dict, ref: Reference, rules: RuleResult, ai: dict | None,
             for f in findings:
                 if f.code == mild:
                     f.code = strict
-            if any(code == mild for code, _ in flag_notes):  # the flags said controlled: the AI raised it
+            if any(code == mild for code, _ in flag_notes):  # the rules said controlled: the AI raised it
                 flag_notes = [(code, note) for code, note in flag_notes if code != mild]
-                flag_notes.append((strict, f"not under control is the AI's judgement: the clinic's {flag_kind} "
-                                           "flags say controlled"))
+                flag_notes.append((strict, f"not under control is the AI's judgement: the {flag_kind} "
+                                           f"{'readings' if flag_kind == 'BP' else 'flags'} say controlled"))
 
     grouped: dict[str, dict] = {}
     for f in findings:
-        name = (_UNKNOWN_NAME[f.code] if f.code in unknown
+        name = (names[f.code] if f.code in names
                 else THYROID_GUESS_NAME if f.code == "hypothyroid" and thyroid_guessed
                 else ref.conditions[f.code]["name"])
         g = grouped.setdefault(f.code, {"code": f.code, "name": name,

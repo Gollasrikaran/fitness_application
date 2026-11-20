@@ -32,6 +32,9 @@ class Condition(Base):
     bucket: Mapped[str] = mapped_column(String(16))  # supported | refer
     display_order: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str] = mapped_column(Text, default="")
+    # Fixed advice for the patient, added to every plan by code, never by the
+    # AI (fix 02, 2026-11-20): two patients with one condition get the same lines.
+    patient_advice: Mapped[str] = mapped_column(Text, default="")
 
 
 class Exercise(Base):

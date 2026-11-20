@@ -107,7 +107,12 @@ function readingsText(readings) {
   const known = Object.keys(READING).filter((k) => k in readings);
   const seen = known
     .filter((k) => readings[k])
-    .map((k) => `${READING[k][0]} ${READING[k][1](readings[k])} (${readings[k].date}${readings[k].older ? ", older reading" : ""})`);
+    .map((k) => {
+      const r = readings[k];
+      // BP is the average of the latest readings since fix 03 (2026-11-20).
+      const when = r.count > 1 ? `average of ${r.count} readings, ${r.from} to ${r.date}` : r.date;
+      return `${READING[k][0]} ${READING[k][1](r)} (${when}${r.older ? ", older reading" : ""})`;
+    });
   const window = (READING_DAYS.find(([d]) => d === readings.days) || READING_DAYS[0])[1];
   const extra = readings.days > 90 ? ` (older readings included by the doctor: ${window})` : "";
   const missing = known.filter((k) => !readings[k]);
@@ -291,7 +296,7 @@ function ReviewCard({ p, patientId, assessment, doctor, onChanged }) {
 
       <label className="sub">
         Instructions for the patient
-        <textarea rows={3} value={instructions} onChange={(e) => setInstructions(e.target.value)}
+        <textarea rows={8} value={instructions} onChange={(e) => setInstructions(e.target.value)}
                   placeholder={p.source === "doctor" ? "Write the plan for the patient" : ""} />
       </label>
       {error && <p className="error small">{error}</p>}

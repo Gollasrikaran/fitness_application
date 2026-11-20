@@ -79,3 +79,33 @@ def test_the_reply_is_plain_text():
 def test_the_plan_status_only_when_asked():
     assert "only when the doctor asks about the plan" in DOCTOR_CHAT
     assert "Write plain text" in DOCTOR_CHAT
+
+
+# ── "Provisional diagnosis" is not a finding (fix 07, 2026-11-20) ───────────
+
+import pytest as _pytest
+
+from agent.assess import _drop_known_missing, about_provisional
+from agent.prompts import ASSESS
+
+
+@_pytest.mark.parametrize("item", [
+    "Asthma diagnosis at the 2026-09-26 visit is recorded as provisional",     # 30ca6dbf's concern
+    "confirmed diagnosis (current diagnosis is provisional)",                  # 1123000d's missing item
+    "The diagnosis of tinea is not yet confirmed", "Unconfirmed asthma",
+])
+def test_provisional_only_items_are_dropped(item):
+    assert about_provisional(item)
+    assert _drop_known_missing([item, "height (BMI cannot be calculated)"], {}) == ["height (BMI cannot be calculated)"]
+
+
+@_pytest.mark.parametrize("item", [
+    "Weakness reported at visit 2026-07-20 alongside the hypertension complaint; cause not recorded.",
+    "Chest pain on 2026-10-01 with a provisional diagnosis of gastritis: check it has settled.",
+])
+def test_other_items_stay(item):
+    assert not about_provisional(item)
+
+
+def test_the_assessment_prompt_says_provisional_is_the_diagnosis():
+    assert "Treat diagnosis_provisional as the diagnosis" in ASSESS

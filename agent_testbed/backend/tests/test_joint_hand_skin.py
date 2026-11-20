@@ -5,7 +5,7 @@ research/JOINT_AND_BACK_PAIN.md, research/SKIN.md).
   is dropped ("knee joint pain" is knee pain only); one alias row may carry
   several codes ("djd knee spine": knee and spine).
 - New aliases, warning complaints and conditions (hand_pain,
-  skin_condition, skin_infection), and 6 exercises with their grid rows.
+  skin_fungal and skin_dermatitis since fix 01, skin_infection), and 6 exercises with their grid rows.
 - Hand exercises only for hand or wrist pain, in a hand slot that takes the
   upper-body slot's place."""
 from datetime import date
@@ -78,8 +78,10 @@ def test_multi_code_rows_load_as_one_alias_per_code():
 
 @pytest.mark.parametrize("text, code", [
     ("Hand pain", "hand_pain"), ("finger joint pain", "hand_pain"), ("trigger finger", "hand_pain"),
-    ("Eczema", "skin_condition"), ("LSC", "skin_condition"), ("Reecalcitrant Tinea", "skin_condition"),
-    ("fungal infection", "skin_condition"), ("psoriasis", "skin_condition"),
+    ("Eczema", "skin_dermatitis"), ("LSC", "skin_dermatitis"), ("psoriasis", "skin_dermatitis"),
+    ("ACD, telogen", "skin_dermatitis"), ("allergic contact dermatitis", "skin_dermatitis"),
+    ("Reecalcitrant Tinea", "skin_fungal"), ("tinea corporis", "skin_fungal"), ("fungal infection", "skin_fungal"),
+    ("dermatophytosis", "skin_fungal"),
     ("Herpes zoster", "skin_infection"), ("cellulitis leg", "skin_infection"),
     ("LBA", "chronic_back_pain"), ("acute lumbago", "chronic_back_pain"), ("oa knees", "arthritis_knee"),
     ("lumbar radiculopathy", "neurological"), ("HT", "bp_any"),
@@ -111,9 +113,11 @@ def test_a_skin_infection_counts_for_30_days(ref):
 
 def test_new_conditions(db):
     assert db.get(Condition, "hand_pain").bucket == "supported"
-    assert db.get(Condition, "skin_condition").bucket == "supported"
+    assert db.get(Condition, "skin_fungal").bucket == "supported"
+    assert db.get(Condition, "skin_dermatitis").bucket == "supported"
+    assert db.get(Condition, "skin_condition") is None  # split in two (fix 01)
     assert db.get(Condition, "skin_infection").bucket == "refer"
-    assert "dry well" in db.get(Condition, "skin_condition").notes
+    assert "dry well" in db.get(Condition, "skin_fungal").patient_advice
     assert "tingles" in db.get(Condition, "chronic_back_pain").notes
 
 
@@ -138,7 +142,7 @@ def test_new_exercises_have_a_verdict_for_every_supported_condition_and_no_avoid
 
 
 def test_new_conditions_rank_every_exercise_once(db):
-    for code in ("hand_pain", "skin_condition", "chronic_back_pain", "carpal_tunnel"):
+    for code in ("hand_pain", "skin_fungal", "skin_dermatitis", "chronic_back_pain", "carpal_tunnel"):
         ranks = sorted(db.scalars(select(SafetyRule.usefulness_rank).where(SafetyRule.condition_code == code)))
         assert ranks == list(range(1, 34)), code
 
@@ -154,7 +158,10 @@ def test_grid_exceptions(db):
         assert "floor" in verdicts(db, "arthritis_knee")[kind].note and \
             verdicts(db, "arthritis_knee")[kind].verdict == "modify"
     assert verdicts(db, "hand_pain")["wall_pushup"].verdict == "modify"
-    assert verdicts(db, "skin_condition")["running"].verdict == "modify"
+    assert verdicts(db, "skin_fungal")["running"].verdict == "modify"
+    assert verdicts(db, "skin_dermatitis")["running"].verdict == "modify"
+    assert "moisturise" in verdicts(db, "skin_dermatitis")["running"].note
+    assert "moisturise" not in verdicts(db, "skin_fungal")["running"].note
     assert verdicts(db, "carpal_tunnel")["towel_squeeze"].verdict == "modify"
     assert "hold your breath" in verdicts(db, "bp_controlled")["towel_squeeze"].note
     assert verdicts(db, "spondylosis")["wall_pelvic_tilt"].usefulness_rank == 3
@@ -175,7 +182,8 @@ def slots(db, codes):
     return {name: [e["activity_type"] for e in options] for name, options in plans.plan_slots(allowed)}, allowed
 
 
-@pytest.mark.parametrize("codes", [["none"], ["arthritis_knee"], ["bp_controlled"], ["skin_condition"]])
+@pytest.mark.parametrize("codes", [["none"], ["arthritis_knee"], ["bp_controlled"], ["skin_fungal"],
+                                   ["skin_dermatitis"]])
 def test_no_hand_exercises_without_hand_pain(db, codes):
     s, allowed = slots(db, codes)
     assert not {e["activity_type"] for e in allowed} & set(HAND)

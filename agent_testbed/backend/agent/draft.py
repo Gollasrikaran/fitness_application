@@ -204,10 +204,8 @@ def build_draft(db: Session, patient_id: str, assessment: dict, patient: dict,
         return doctor([f"No exercise is allowed for this patient: {label}", *profile_rules])
 
     try:
-        # The conditions' notes (e.g. the skin advice), so the patient's instructions carry them.
-        notes = {c.display_name: c.notes for c in db.scalars(select(Condition).where(Condition.code.in_(codes)))
-                 if c.notes and c.code not in ("none", "other_unlisted")}
-        answer = ask_ai(assessment, {**patient, "condition_notes": notes} if notes else patient, allowed)
+        # No condition advice for the AI: the code adds it (patient_instructions()).
+        answer = ask_ai(assessment, patient, allowed)
         known = _numbers(" ".join(str(patient.get(k) or "") for k in ("age", "bmi")))  # the AI may quote these
         exercises, problems = _from_ai(answer, allowed, known)
         problems += plan_store.violations(db, exercises, codes, readings) if not problems else []
@@ -217,7 +215,7 @@ def build_draft(db: Session, patient_id: str, assessment: dict, patient: dict,
     if not problems:
         reason = "\n".join([answer.reason.strip(), *profile_rules,
                             "Doses are the reviewed starting doses from the safety rules."])
-        return save("ai", exercises, answer.instructions.strip(), reason)
+        return save("ai", exercises, patient_instructions(db, codes, answer.instructions, exercises), reason)
 
     log.warning("AI draft not used for patient %s: %s", patient_id, "; ".join(problems))
     exercises, profile_rules = plan_store.starter_exercises(db, codes, patient.get("age"), patient.get("bmi"), readings=readings)
@@ -228,7 +226,35 @@ def build_draft(db: Session, patient_id: str, assessment: dict, patient: dict,
         return doctor([f"The rules could not build a safe draft: {'; '.join(broken) or 'no exercises'}"])
     reason = "\n".join([f"AI draft not used: {'; '.join(problems)}.",
                         f"Exercises chosen by the safety grid for: {label}.", *profile_rules])
-    return save("rules", exercises, f"Starter plan built from the safety rules for: {label}.", reason)
+    return save("rules", exercises, patient_instructions(db, codes, RULES_OPENING, exercises), reason)
+
+
+# The patient's instructions (fix 02, 2026-11-20): the AI writes only the
+# opening sentences; the effort, every condition's advice and the warning
+# signs are fixed lines added here, the same for every patient with that
+# condition, and never shortened by the AI.
+RULES_OPENING = "Start gently and go at your own pace. Do the exercises as your doctor has set them."
+EFFORT = "Walk at a pace where you can talk but not sing."
+WARNING = ("Some puffing and mild muscle ache are normal. Stop and phone your doctor if you get chest pain or "
+           "tightness, feel faint or dizzy, or are breathless and it doesn't settle with rest.")
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
+def patient_instructions(db: Session, codes: list[str], opening: str, exercises: list[dict]) -> str:
+    """One line each: the opening, the effort (with a walking-type exercise),
+    each condition's advice (data/conditions.csv, patient_advice) and the
+    warning signs. A sentence two conditions share is written once."""
+    lines = [opening.strip()]
+    if any(x["activity_type"] in plan_store.CORE_AEROBIC for x in exercises):
+        lines.append(EFFORT)
+    seen = set()
+    for c in db.scalars(select(Condition).where(Condition.code.in_(codes)).order_by(Condition.display_order)):
+        new = [s for s in _SENTENCE_END.split(c.patient_advice or "") if s.strip() and s.strip().lower() not in seen]
+        seen.update(s.strip().lower() for s in new)
+        if new:
+            lines.append(" ".join(new))
+    lines.append(WARNING)
+    return "\n".join(line for line in lines if line)
 
 
 def assessment_age(patient: dict) -> int | None:
@@ -249,10 +275,19 @@ def eligibility_note(context: dict) -> str | None:
             + (f" Its reason: {reason}." if reason else "") + " Please check before approving.")
 
 
+DOCTOR_NOTE_CHARS = 1500  # the doctor's note as the draft AI reads it (some are long advice sheets)
+
+
 def patient_profile(context: dict) -> dict:
-    """What the draft needs about the patient: {age, sex, bmi, eligibility_note}."""
+    """What the draft needs about the patient: {age, sex, bmi,
+    eligibility_note, doctor_instructions}. doctor_instructions: the doctor's
+    own advice on the latest prescription, so the AI never contradicts it
+    (fix 02: 1123000d's plan said the opposite of her doctor's note)."""
+    meds = context.get("medicines") or {}
+    note = (meds.get("patient_instructions") or "").strip()
     return {"age": context["patient"]["age"], "sex": context["patient"]["sex"], "bmi": context["body"]["bmi"],
-            "eligibility_note": eligibility_note(context)}
+            "eligibility_note": eligibility_note(context),
+            "doctor_instructions": {"date": meds.get("from"), "text": note[:DOCTOR_NOTE_CHARS]} if note else None}
 
 
 def generate_plan(patient_id: str, doctor_id: str, reading_days: int = plan_store.READING_DAYS) -> dict:

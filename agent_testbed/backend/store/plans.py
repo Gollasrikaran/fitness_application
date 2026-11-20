@@ -156,7 +156,7 @@ def approved_exercises(db: Session, codes: list[str]) -> list[dict]:
         if set(by_condition) != set(codes) or any(r.verdict == "avoid" for r in by_condition.values()):
             continue
         notes = [r.note for r in by_condition.values() if r.verdict == "modify" and r.note]
-        names = {c.code: re.sub(r"\s*\(.*?\)", "", c.display_name) for c in conditions}  # "Skin problem (...)" -> "Skin problem"
+        names = {c.code: re.sub(r"\s*\(.*?\)", "", c.display_name) for c in conditions}  # "Fungal skin infection (tinea)" -> "Fungal skin infection"
         benefits = [f"{names[code]}: {by_condition[code].benefit}" for code in codes
                     if code in by_condition and by_condition[code].benefit]
         approved.append({"activity_type": ex.activity_type, "display_name": ex.display_name,
@@ -403,23 +403,53 @@ def _window(metric: str, days: int, windows: dict | None) -> tuple[int, int]:
     return own, max(own, days) if days > READING_DAYS else own
 
 
+BP_AVERAGE_OF = 3  # BP is the average of the latest readings on this many dates (fix 03, 2026-11-20)
+
+
+def bp_of(v: dict) -> tuple[float, float] | None:
+    sys_, dia = _reading(v.get("bp_sys")), _reading(v.get("bp_dia"))
+    if sys_ is None or dia is None:
+        m = re.match(r"\s*(\d{2,3})\s*/\s*(\d{2,3})", str(v.get("bp") or ""))
+        sys_, dia = (float(m[1]), float(m[2])) if m else (None, None)
+    return (sys_, dia) if sys_ and dia else None
+
+
+def _whole(x: float) -> float:
+    return float(int(x + 0.5))
+
+
 def latest_bp(vitals: list[dict], today: date, days: int = READING_DAYS, windows: dict | None = None) -> dict | None:
-    """The newest BP reading in the visits (newest first), if within BP's
-    window: {"sys", "dia", "date"}. With older readings included (days >
-    READING_DAYS), an older one counts only if high."""
+    """The patient's BP for the rules: the average of the latest readings on
+    up to BP_AVERAGE_OF dates within BP's window (one reading per date: the
+    clinic often has two records a day). {"sys", "dia", "date"} (date: the
+    newest), plus "count", "from" (the oldest date) and "readings" when it
+    averages several. Guidelines judge BP from the average of readings on
+    two or more visits, not one (ESC 2024; decided 2026-11-20, fix 03).
+    No reading within the window: with older readings included (days >
+    READING_DAYS), the newest older one counts only if high."""
     own, look_back = _window("bp", days, windows)
+    found: dict[str, tuple[dict, float, float]] = {}
     for v in vitals:
-        sys_, dia = _reading(v.get("bp_sys")), _reading(v.get("bp_dia"))
-        if sys_ is None or dia is None:
-            m = re.match(r"\s*(\d{2,3})\s*/\s*(\d{2,3})", str(v.get("bp") or ""))
-            sys_, dia = (float(m[1]), float(m[2])) if m else (None, None)
-        if sys_ and dia and v.get("date"):
-            age = _age(v, today)
-            high = sys_ >= ASSUMED_BP["sys"] or dia >= ASSUMED_BP["dia"]
-            if age <= own or (age <= look_back and high):
+        bp = bp_of(v)
+        if bp and v.get("date"):
+            day = str(v["date"])[:10]
+            if day not in found:
+                found[day] = (v, *bp)
+    dated = sorted(found.items(), reverse=True)
+    recent = [(day, v, s, d) for day, (v, s, d) in dated if _age(v, today) <= own][:BP_AVERAGE_OF]
+    if not recent:
+        if dated:
+            v, sys_, dia = dated[0][1]
+            if _age(v, today) <= look_back and (sys_ >= ASSUMED_BP["sys"] or dia >= ASSUMED_BP["dia"]):
                 return _dated({"sys": sys_, "dia": dia}, v, today, own)
-            return None
-    return None
+        return None
+    newest = recent[0][1]
+    if len(recent) == 1:
+        return _dated({"sys": recent[0][2], "dia": recent[0][3]}, newest, today, own)
+    return {**_dated({"sys": _whole(sum(r[2] for r in recent) / len(recent)),
+                      "dia": _whole(sum(r[3] for r in recent) / len(recent))}, newest, today, own),
+            "count": len(recent), "from": recent[-1][0],
+            "readings": [f"{s:g}/{d:g} on {day}" for day, _, s, d in recent]}
 
 
 def _latest_value(vitals: list[dict], today: date, metric: str, days: int = READING_DAYS,
@@ -461,6 +491,8 @@ def reading_text(metric: str, r: dict) -> str:
         value = f"{r['value']:g}"
     if r.get("assumed"):
         return f"{value} (no reading in the last {READING_DAYS} days, so treated as this)"
+    if r.get("count", 1) > 1:
+        return f"{value}{_UNITS.get(metric, '')} (average of {r['count']} readings, {r['from']} to {r['date']})"
     return f"{value}{_UNITS.get(metric, '')} on {r['date']}"
 
 

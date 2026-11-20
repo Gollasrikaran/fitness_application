@@ -300,25 +300,35 @@ def test_the_ai_line_may_quote_only_numbers_from_the_evidence_or_the_patient(db)
 
 
 def test_evidence_lines_use_short_condition_names(db):
-    allowed, _ = plans.candidates(db, ["skin_condition"], 40, 24)
+    allowed, _ = plans.candidates(db, ["skin_fungal"], 40, 24)
     walk = next(e for e in allowed if e["activity_type"] == "walk")
-    assert walk["benefits"] == ["Skin problem: allowed as usual; walk at a cool time of day to limit sweat and itch"]
+    assert walk["benefits"] == ["Fungal skin infection: allowed as usual; walk at a cool time of day to limit sweat, "
+                                "which keeps the skin damp"]
 
 
-def test_skin_advice_separates_eczema_and_fungal_infection(db):
-    notes = db.get(Condition, "skin_condition").notes
-    assert "dry well" in notes and "Eczema: put on your moisturiser" in notes and "keep the area dry" in notes
+def test_fungal_and_dermatitis_get_opposite_skin_advice(db):
+    """Fix 01 (2026-11-20): a patient with dermatitis (1123000d, "ACD") got
+    the fungal advice, against her doctor's note to moisturise."""
+    fungal = db.get(Condition, "skin_fungal").patient_advice
+    dermatitis = db.get(Condition, "skin_dermatitis").patient_advice
+    assert "dry well" in fungal and "no cream on it" in fungal and "don't share towels" in fungal
+    assert "moisturiser" not in fungal
+    assert "moisturiser" in dermatitis and "not catching" in dermatitis
+    assert "towel" not in dermatitis and "no cream" not in dermatitis
+    for notes in (fungal, dermatitis):
+        assert "broken or oozing" in notes
 
 
-def test_the_ai_gets_the_conditions_advice(db):
+def test_the_conditions_advice_is_added_by_code_not_by_the_ai(db):
     seen = {}
 
     def ask(assessment, patient, allowed):
         seen.update(patient)
         return ai_picking("walk")(assessment, patient, allowed)
 
-    build_draft(db, "p1", assessment(["skin_condition"]), PATIENT, ask_ai=ask)
-    assert "loose cotton" in seen["condition_notes"]["Skin problem (eczema, fungal infection)"]
+    p = build_draft(db, "p1", assessment(["skin_fungal"]), PATIENT, ask_ai=ask)
+    assert "condition_notes" not in seen
+    assert "loose cotton" in p.instructions
 
 
 def test_every_research_line_belongs_to_a_safety_rule(db):
@@ -354,7 +364,7 @@ def test_the_draft_ai_never_sees_the_medicine_notes():
     """6959e408 (2026-11-18): the AI justified a balance exercise with cetirizine's
     drowsiness. Medicine notes are for the doctor only; the other concerns stay."""
     from agent.draft import patient_for_ai
-    a = {"problem": "tinea and obesity", "body_area": "skin", "conditions": [{"code": "obesity", "name": "Overweight"}],
+    a = {"problem": "tinea and obesity", "body_area": "skin", "conditions": [{"code": "obesity", "name": "Obesity"}],
          "concerns": ["Weakness was the complaint on 2026-07-20.", "Medicine: TAB CITRIZINE: may cause drowsiness",
                       "medicine: Amlodipine: dizziness on standing", "Clinic flag: 2 missed follow-ups"]}
     seen = patient_for_ai(a, {"age": 57, "sex": "MALE", "bmi": 31.2})

@@ -168,7 +168,8 @@ def _aliases(conditions: dict) -> list[dict]:
 def _from_csv() -> tuple[dict, dict, dict]:
     conditions = {r["condition_code"]: {
         "code": r["condition_code"], "display_name": r["display_name"], "bucket": r["bucket"],
-        "display_order": _int(r["display_order"], 0), "notes": r.get("notes") or ""}
+        "display_order": _int(r["display_order"], 0), "notes": r.get("notes") or "",
+        "patient_advice": (r.get("patient_advice") or "").strip()}
         for r in _rows("conditions.csv")}
     exercises = {r["activity_type"]: {
         "activity_type": r["activity_type"], "display_name": r["display_name"],

@@ -161,3 +161,56 @@ def test_an_ai_uncontrolled_needs_the_record_to_say_so(ref):
                           problem="asthma", body_area="chest", severity="mild", concerns=[], missing=[])
     kept, dropped, _ = _check(answer, ref, record)
     assert [f.code for f in kept] == ["asthma_any", "asthma_uncontrolled"] and not dropped
+
+
+# ── "Under control" needs a record long enough to show it (fix 03, 2026-11-20) ──
+
+def asthma_name(ctx, ref, today=date(2026, 11, 20)):
+    out = finalize(ctx, ref, rule_findings(ctx, ref, today), {"severity": "mild", "problem": "x"}, [], today)
+    return next(c for c in out["conditions"] if c["code"] == "asthma_controlled")
+
+
+def test_a_short_record_says_asthma_control_not_known(ref):
+    """069d26fe: 7 visits, 31 Jul - 3 Oct, all for tinea."""
+    days = ["2026-10-03", "2026-09-21", "2026-09-08", "2026-08-20", "2026-08-10", "2026-07-31"]
+    asthma = asthma_name(context(history=["asthma"], visits=[visit(d, diagnosis="Tinea") for d in days]), ref)
+    assert asthma["name"] == "Asthma, control not known (record: 6 visits, 2026-07-31 to 2026-10-03)"
+    assert any("too short to show 6 months" in e for e in asthma["evidence"])
+    assert not any("in the last 6 months" in e for e in asthma["evidence"])
+
+
+def test_one_visit_says_asthma_control_not_known(ref):
+    """30ca6dbf: one visit (26 Sep, a cold)."""
+    ctx = context(visits=[visit("2026-09-26", complaint="Astama patient cough cold", diagnosis="Asthma")])
+    assert asthma_name(ctx, ref)["name"] == "Asthma, control not known (record: 1 visit, 2026-09-26)"
+
+
+def test_a_long_record_with_no_signs_is_asthma_under_control(ref):
+    ctx = context(history=["asthma"], visits=[visit("2026-10-20", diagnosis="Asthma"), visit("2026-03-01")])
+    asthma = asthma_name(ctx, ref)
+    assert asthma["name"] == "Asthma under control"
+    assert any("no breathlessness or wheeze in the last 6 months" in e for e in asthma["evidence"])
+
+
+# ── SpO2 within its window only (fix 05, 2026-11-20) ────────────────────────
+# 30ca6dbf: the readings line said SpO2 "none recent" (26 Sep, older than 30
+# days) while the asthma evidence cited "SpO2 99% on 2026-09-26".
+
+def test_an_old_normal_spo2_is_not_cited(ref):
+    ctx = context(history=["asthma"], visits=[visit("2026-09-26", diagnosis="Asthma", spo2=99)])
+    asthma = asthma_name(ctx, ref)
+    assert not any("99%" in e for e in asthma["evidence"])
+    assert any("no SpO2 reading in the last 30 days" in e for e in asthma["evidence"])
+
+
+def test_a_recent_normal_spo2_is_cited(ref):
+    ctx = context(history=["asthma"], visits=[visit("2026-11-10", diagnosis="Asthma", spo2=98)])
+    assert any("SpO2 98% on 2026-11-10" in e for e in asthma_name(ctx, ref)["evidence"])
+
+
+def test_an_old_low_spo2_still_means_not_under_control(ref):
+    ctx = context(history=["asthma"], visits=[visit("2026-09-26", diagnosis="Asthma", spo2=91)])
+    out = finalize(ctx, ref, rule_findings(ctx, ref, date(2026, 11, 20)), {"severity": "mild", "problem": "x"}, [],
+                   date(2026, 11, 20))
+    asthma = next(c for c in out["conditions"] if c["code"] == "asthma_uncontrolled")
+    assert any("SpO2 91% on 2026-09-26 (older than 30 days)" in e for e in asthma["evidence"])

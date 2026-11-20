@@ -1,6 +1,7 @@
 """Phase 8 safety tests (agent.routing, agent.conditions, agent.assess._check):
-whatever the AI says, the rules' severity stands; BP and sugar control
-follows the clinic's flags; warning complaints; the AI quote checks."""
+whatever the AI says, the rules' severity stands; BP control follows the
+average reading (fix 03) and sugar control the clinic's flags; warning
+complaints; the AI quote checks."""
 import random
 from datetime import date
 
@@ -9,6 +10,7 @@ import pytest
 from agent.assess import AIAssessment, AIFinding, _check
 from agent.conditions import Finding, RuleResult, load_reference, rule_findings
 from agent.routing import finalize
+from store import plans
 from store.models import ConditionAlias, WarningComplaint
 
 TODAY = date(2026, 10, 26)
@@ -73,22 +75,55 @@ def test_ai_controlled_bp_cannot_override_high_flags(ref):
     assert "high_bp" in out["codes"] and "bp_controlled" not in out["codes"]
 
 
-# ── BP and sugar: the clinic's flags decide (decided 2026-10-23) ────────────
+# ── BP: the average of the latest readings decides (fix 03, 2026-11-20) ─────
+# Below 140/90 under control; 140-159/90-99 above target (an AI draft with
+# the 140/90 limits); 160/100 or above, or a critical flag: a doctor. One
+# reading only: control not known. HIGH flags no longer decide on their own.
+# Sugar still follows the clinic's flags (decided 2026-10-23).
 
-@pytest.mark.parametrize("flags, expected", [
-    ([flag("BP_SYS_HIGH", "HIGH", "2026-10-20")], "high_bp"),                  # latest reading high
-    ([flag("BP_DIA_CRITICAL", "CRITICAL", "2026-08-01")], "high_bp"),          # critical in the last 5 visits
-    ([flag("BP_SYS_ELEVATED", "ELEVATED", "2026-10-20")], "bp_controlled"),    # elevated doesn't count
-    ([flag("BP_SYS_LOW", "LOW", "2026-10-20")], "bp_controlled"),              # low doesn't count
-    ([flag("BP_SYS_HIGH", "HIGH", "2026-08-01")], "bp_controlled"),            # high, but not the latest reading
-    ([], "bp_controlled"),
+def bp_visits(*readings):
+    """("2026-10-20", "130/80"), ... -> visits, the first with the HTN diagnosis."""
+    return [visit(day, diagnosis="HTN" if i == 0 else None, bp=bp) for i, (day, bp) in enumerate(readings)]
+
+
+@pytest.mark.parametrize("readings, flags, code, name", [
+    ([("2026-10-20", "130/80"), ("2026-09-20", "120/78")], [], "bp_controlled", "BP under control"),
+    ([("2026-10-10", "133/87"), ("2026-09-17", "130/90"), ("2026-08-29", "150/93")], [],  # 6959e408
+     "bp_controlled", "BP above target (average 138/90 of 3 readings)"),
+    ([("2026-10-20", "170/105"), ("2026-09-20", "160/100")], [], "high_bp", None),
+    ([("2026-10-20", "131/90")], [], "bp_controlled", "BP, control not known (one reading in 90 days: 131/90)"),
+    ([("2026-10-20", "130/80"), ("2026-09-20", "120/78")], [flag("BP_DIA_CRITICAL", "CRITICAL", "2026-08-01")],
+     "high_bp", None),                                                              # critical in the last 5 visits
+    ([("2026-10-20", "141/80"), ("2026-09-20", "120/78")], [flag("BP_SYS_HIGH", "HIGH", "2026-10-20")],
+     "bp_controlled", "BP under control"),                                          # a HIGH flag alone: the average decides
+    ([("2026-10-20", "120/80"), ("2026-10-01", "120/80"), ("2026-09-20", "120/80"), ("2026-09-01", "200/120")], [],
+     "bp_controlled", "BP under control"),                                          # only the latest 3 dates
 ])
-def test_bp_control_follows_the_flags(ref, flags, expected):
-    ctx = context(visits=[visit("2026-10-20", diagnosis="HTN", bp="130/80"),
-                          visit("2026-08-01", bp="150/95")], flags=flags)
-    out = assess(ctx, ref)
-    assert expected in out["codes"]
-    assert (out["severity"] == "severe") == (expected == "high_bp")
+def test_bp_control_follows_the_average(ref, readings, flags, code, name):
+    out = assess(context(visits=bp_visits(*readings), flags=flags), ref)
+    assert code in out["codes"]
+    assert (out["severity"] == "severe") == (code == "high_bp")
+    if name:
+        assert next(c for c in out["conditions"] if c["code"] == code)["name"] == name
+
+
+def test_two_records_on_one_day_count_once_in_the_average(ref):
+    ctx = context(visits=[visit("2026-10-20", diagnosis="HTN", bp="150/95"), visit("2026-10-20", bp="150/95"),
+                          visit("2026-09-20", bp="120/80")])
+    bp = next(c for c in assess(ctx, ref)["conditions"] if c["code"] == "bp_controlled")
+    assert bp["name"] == "BP under control"  # 135/88 from 2 dates, not 140/90 from 3 records
+    assert any("average of 2 readings" in e for e in bp["evidence"])
+
+
+def test_above_target_bp_gets_the_140_90_limits(db):
+    readings = {"bp": plans.latest_bp([{"date": "2026-10-10", "bp": "133/87"}, {"date": "2026-09-17", "bp": "130/90"},
+                                       {"date": "2026-08-29", "bp": "150/93"}], date(2026, 11, 20))}
+    assert readings["bp"] == {"sys": 138.0, "dia": 90.0, "date": "2026-10-10", "count": 3, "from": "2026-08-29",
+                              "readings": ["133/87 on 2026-10-10", "130/90 on 2026-09-17", "150/93 on 2026-08-29"]}
+    allowed, lines = plans.candidates(db, ["bp_controlled"], 57, 25, readings)
+    kinds = {e["activity_type"] for e in allowed}
+    assert not kinds & {"wall_sit", "neck_isometric", "running"} and "walk" in kinds
+    assert any("138/90 (average of 3 readings, 2026-08-29 to 2026-10-10)" in line for line in lines)
 
 
 def test_bp_with_no_reading_counts_as_controlled(ref):
@@ -313,7 +348,7 @@ def test_ai_text_never_claims_control(text, out):
 
 from datetime import date as _date
 
-from agent.routing import _BP_FLAG, _BP_KEYS, _SUGAR_FLAG, _SUGAR_KEYS, _uncontrolled
+from agent.routing import _SUGAR_FLAG, _SUGAR_KEYS, _bp_control, _uncontrolled
 
 _TODAY = _date(2026, 11, 16)
 
@@ -327,17 +362,24 @@ def test_an_old_normal_sugar_is_control_not_known():
                    "not flagged high, so whether it is under control is not known")
 
 
-def test_an_old_high_bp_still_means_not_under_control():
-    visits = [{"date": "2026-07-10", "vitals": {"bp": "172/98"}}]
-    flags = [{"date": "2026-07-10", "code": "BP_SYS_HIGH", "severity": "ABNORMAL"}]
-    bad, why = _uncontrolled(visits, flags, _BP_FLAG, _BP_KEYS, "BP", _TODAY, 90)
-    assert bad is True and "129 days ago: older than its 90-day window) flagged BP_SYS_HIGH" in why
+def bp_ctx(*readings):
+    return {"visits": [{"date": day, "vitals": {"bp": bp}} for day, bp in readings], "vital_flags": []}
 
 
-def test_a_recent_normal_reading_is_still_under_control():
-    visits = [{"date": "2026-10-01", "vitals": {"bp": "135/76"}}]
-    bad, _ = _uncontrolled(visits, [], _BP_FLAG, _BP_KEYS, "BP", _TODAY, 90)
-    assert bad is False
+def test_an_old_very_high_bp_still_means_not_under_control():
+    bad, why, _ = _bp_control(bp_ctx(("2026-07-10", "172/98")), None, _TODAY)
+    assert bad is True and "older than 90 days, at or above 160/100" in why
+
+
+def test_an_old_bp_below_160_100_is_control_not_known():
+    bad, why, name = _bp_control(bp_ctx(("2026-07-10", "150/95")), None, _TODAY)
+    assert bad is None and "no BP reading in the last 90 days" in why
+    assert name is None  # shown as "BP, control not known (no recent BP reading)"
+
+
+def test_recent_normal_readings_are_under_control():
+    bad, why, name = _bp_control(bp_ctx(("2026-10-01", "135/76"), ("2026-09-01", "125/80")), None, _TODAY)
+    assert bad is False and name is None and "below 140/90" in why
 
 
 def test_finalize_shows_an_old_normal_reading_as_control_not_known(db):

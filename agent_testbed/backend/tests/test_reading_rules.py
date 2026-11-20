@@ -27,10 +27,12 @@ def allowed(db, reading, codes=("bp_controlled",)):
 
 # ── Which reading counts ────────────────────────────────────────────────────
 
-def test_latest_bp_takes_the_newest_reading():
+def test_bp_is_the_average_of_the_latest_readings():
+    """Fix 03 (2026-11-20): the average of up to 3 dates within 90 days, not the newest alone."""
     vitals = [{"date": date(2026, 10, 20), "bp": "150/95", "bp_sys": 150.0, "bp_dia": 95.0},
               {"date": date(2026, 9, 1), "bp_sys": 120.0, "bp_dia": 80.0}]
-    assert plans.latest_bp(vitals, TODAY) == bp(150, 95)
+    assert plans.latest_bp(vitals, TODAY) == {**bp(135, 88), "count": 2, "from": "2026-09-01",
+                                              "readings": ["150/95 on 2026-10-20", "120/80 on 2026-09-01"]}
 
 
 def test_latest_bp_reads_the_text_when_the_numbers_are_missing():

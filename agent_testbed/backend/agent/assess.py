@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import date
+from datetime import date, timedelta
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -63,15 +63,43 @@ def _visits_for_ai(visits: list[dict], today: date | None, medicine_days: int | 
             for v in visits]
 
 
+# "5 days", "2 weeks", "1 month", "x 10 day": a course's length (fix 04, 2026-11-20).
+_COURSE = re.compile(r"\b(\d{1,3})\s*(days?|weeks?|wks?|months?)\b", re.I)
+_UNIT_DAYS = {"d": 1, "w": 7, "m": 30}
+
+
+def course_days(item: dict) -> int | None:
+    """How many days a medicine is prescribed for: its duration field, else
+    the duration written in its text (the API often puts everything in the
+    name: "Azee — 1-0-0 · After food · 5 days"). None when not written."""
+    for text in (item.get("duration"), item.get("name")):
+        matches = _COURSE.findall(str(text or ""))
+        if matches:
+            n, unit = matches[-1]
+            return int(n) * _UNIT_DAYS[unit[0].lower()]
+    return None
+
+
+def _taking(item: dict, prescribed: str, today: date, medicine_days: int | None) -> bool:
+    """Still being taken on `today`: the course hasn't ended (prescription
+    date + duration). With no duration written, the medicine window counts."""
+    days = course_days(item)
+    if days is not None:
+        return date.fromisoformat(str(prescribed)[:10]) + timedelta(days=days) >= today
+    return medicine_days is None or is_recent(prescribed, today, medicine_days)
+
+
 def _latest_prescription(context: dict, today: date | None, medicine_days: int | None) -> dict | None:
-    """The latest prescription, for the AI's medicine_notes: only if it is
-    within the medicine window (an older one has usually ended)."""
+    """The latest prescription, for the AI's medicine_notes: only the
+    medicines still being taken (fix 04: 30ca6dbf got drowsiness warnings for
+    a 5-day course that ended 7 weeks before). None when none are."""
     meds = context.get("medicines") or {}
     if not meds.get("items") or not meds.get("from"):
         return None
-    if today is not None and medicine_days is not None and not is_recent(meds["from"], today, medicine_days):
-        return None
-    return {"date": meds["from"], "medicines": meds["items"]}
+    if today is None:
+        return {"date": meds["from"], "medicines": meds["items"]}
+    taking = [m for m in meds["items"] if _taking(m, meds["from"], today, medicine_days)]
+    return {"date": meds["from"], "medicines": taking} if taking else None
 
 
 def _record(context: dict, today: date | None = None, medicine_days: int | None = None) -> dict:
@@ -225,7 +253,20 @@ def shown_text(answer: AIAssessment) -> dict:
     medicines = [m.strip() for n in answer.medicine_notes for m in _NEXT_MEDICINE.split(_unlabelled(n, "medicine"))]
     notes = [*answer.concerns, *(f"Medicine: {m.rstrip('.')}" for m in medicines if m)]
     return {"problem": no_control_claims(answer.problem),
-            "concerns": [c for c in map(no_control_claims, notes) if c]}
+            "concerns": [c for c in map(no_control_claims, notes) if c and not about_provisional(c)]}
+
+
+# In this clinic every diagnosis is in the "provisional" field (fix 07,
+# 2026-11-20): an item that only says so is noise, e.g. "Asthma diagnosis …
+# is recorded as provisional", "confirmed diagnosis (current diagnosis is
+# provisional)". The prompt says so; this catches what the AI still writes.
+_PROVISIONAL = re.compile(r"\b(?:recorded|listed|marked|written|noted|only|still|remains?|is|are)\s+(?:as\s+)?"
+                          r"provisional\b|\bconfirmed diagnosis\b|\bnot (?:yet )?confirmed\b|\bunconfirmed\b|"
+                          r"\bdiagnosis is provisional\b|\bprovisional (?:diagnosis )?only\b", re.I)
+
+
+def about_provisional(item: str) -> bool:
+    return bool(_PROVISIONAL.search(item or ""))
 
 
 _MISSING_READING = {"bp": re.compile(r"\b(blood pressure|bp)\b", re.I),
@@ -233,7 +274,7 @@ _MISSING_READING = {"bp": re.compile(r"\b(blood pressure|bp)\b", re.I),
 
 def _drop_known_missing(missing: list[str], readings: dict) -> list[str]:
     have = {k for k in _MISSING_READING if readings.get(k) and not readings[k].get("older")}
-    return [m for m in missing if not any(_MISSING_READING[k].search(m) for k in have)]
+    return [m for m in missing if not any(_MISSING_READING[k].search(m) for k in have) and not about_provisional(m)]
 
 
 def run_assessment(patient_id: str, doctor_id: str, today: date | None = None,

@@ -50,6 +50,8 @@ ASSESS = """You assess one patient's clinic record for an exercise programme run
 
 TODAY is {today}. PATIENT_RECORD holds the recent visits (newest first) with complaints, diagnoses, medicines and vitals, plus the patient's recorded conditions and health history.
 
+In this clinic doctors write the diagnosis in diagnosis_provisional; diagnosis_confirmed is almost always empty. Treat diagnosis_provisional as the diagnosis: never say a diagnosis is provisional or unconfirmed, and never list a confirmed diagnosis as missing.
+
 CONDITIONS is the only list of codes you may use:
 {conditions}
 
@@ -92,11 +94,11 @@ The plan is balanced: the main walking-type exercise, then one exercise for each
 SLOTS:
 {slots}
 
-PATIENT gives the age, sex and BMI, the assessed problem and body area, the patient's conditions, concerns a doctor noted, and condition_notes: advice per condition from our research (e.g. for a skin problem, when and how to exercise).
+PATIENT gives the age, sex and BMI, the assessed problem and body area, the patient's conditions, concerns a doctor noted, and doctor_instructions: the doctor's own advice to the patient at the latest visit (it may be in Marathi or Hindi), or null.
 
 Return:
 1. exercises: exactly one option from each of the {count} slots, by activity_type. Take the best fit unless the patient's problem or body area clearly suits another option of that slot better (e.g. a knee problem and a knee exercise). For each, why: one short line for the doctor, in your own words, saying what the exercise works and how it helps this patient (e.g. "strengthens the thighs, which supports the knee"). Write a why for every exercise you return, including the walking-type one, and don't repeat the same line for two exercises. If the option has EVIDENCE, base the line on it: you may shorten it, but any number you write must be copied exactly from the EVIDENCE (a number not in it makes the code drop your line). Without EVIDENCE, write no numbers and make no claims about effects on illnesses, organs or hormones: say what the exercise works (strength, balance, breathing, flexibility) and how that fits the patient.
-2. instructions: 2 to 5 short sentences for the patient, in plain simple English (many have little schooling). Tell them to go slowly and to stop and phone their doctor if they feel pain, dizziness, chest pain or breathlessness. If PATIENT has condition_notes, add their practical advice in plain words, only the parts that fit the patient's problem (e.g. for a fungal infection: "Exercise when it is cool, in loose cotton clothes; afterwards wash, dry well and change into dry clothes"; never advise a moisturiser for a fungal infection). When a note covers several problems (e.g. eczema and fungal infection), give only the advice for the one in the patient's problem, and don't mention the others: no "if you have ..." for a problem the patient doesn't have. Don't name exercises or give doses or how often: the plan shows those, and the doctor decides them.
+2. instructions: 1 or 2 short opening sentences for the patient, in plain simple English (many have little schooling): encouragement and how to fit the exercises into the day (e.g. "Start gently and build up over the weeks. A regular time each day makes it easier to keep going."). Nothing else: our code adds fixed lines after yours for how hard to work, each condition's advice and the warning signs, so don't write any of those. If PATIENT has doctor_instructions, never contradict them. Don't name exercises or give doses or how often: the plan shows those, and the doctor decides them.
 Ignore medicines: never use a medicine (or its side effects) to choose an exercise or in a why or the reason; the doctor sees the medicines separately.
 Concerns are for the doctor: never say an exercise treats or helps a symptom listed in concerns (e.g. an unexplained weakness); you may only advise caution because of it.
 3. reason: one or two lines for the doctor: why this set suits this patient. Call each condition by its name in PATIENT; don't say a condition is under control unless its name says so. You may use the EVIDENCE lines; add no other medical claims.

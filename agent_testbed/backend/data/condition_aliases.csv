@@ -168,15 +168,17 @@ text,oa hand,hand_pain,
 text,hand osteoarthritis,hand_pain,
 text,trigger finger,hand_pain,
 text,stiff fingers,hand_pain,
-text,eczema,skin_condition,
-text,dermatitis,skin_condition,"atopic, contact dermatitis"
-text,lsc,skin_condition,lichen simplex chronicus
-text,lichen simplex,skin_condition,
-text,psoriasis,skin_condition,same sweat and friction advice
-text,tinea,skin_condition,"fungal infection, any site"
-text,fungal infection,skin_condition,
-text,ringworm,skin_condition,
-text,ring worm,skin_condition,
+text,eczema,skin_dermatitis,
+text,dermatitis,skin_dermatitis,"atopic, contact dermatitis"
+text,acd,skin_dermatitis,allergic contact dermatitis
+text,lsc,skin_dermatitis,lichen simplex chronicus
+text,lichen simplex,skin_dermatitis,
+text,psoriasis,skin_dermatitis,same sweat and friction advice
+text,tinea,skin_fungal,"fungal infection, any site"
+text,fungal infection,skin_fungal,
+text,ringworm,skin_fungal,
+text,ring worm,skin_fungal,
+text,dermatophytosis,skin_fungal,medical name for tinea
 text,herpes zoster,skin_infection,shingles: rest until healed
 text,shingles,skin_infection,
 text,cellulitis,skin_infection,
